@@ -1,0 +1,11 @@
+---
+BasedOnStyle: LLVM
+IndentWidth: 2
+ColumnLimit: 120
+
+AlignAfterOpenBracket: DontAlign
+PenaltyBreakBeforeFirstCallParameter: 0
+BinPackArguments: true
+AllowAllArgumentsOnNextLine: false
+
+Cpp11BracedListStyle: true

@@ -1,0 +1,110 @@
+# Build directories and artifacts
+build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CPackConfig.cmake
+CPackSourceConfig.cmake
+compile_commands.json
+*.ninja
+.ninja_deps
+.ninja_log
+
+# CMake generated files
+CMakeUserPresets.json
+CMakePresets.json
+
+# C/C++ build artifacts
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.app
+*.dSYM/
+
+# Go build artifacts
+/game/libgame.a
+/game/libgame.h
+*.test
+*.prof
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Language server and tooling cache
+.cache/
+.ccls-cache/
+.clangd/
+
+# Platform specific
+*.log
+.tmp/
+temp/
+
+# Package managers
+node_modules/
+vendor/*/build/
+vendor/*/cmake-build-*/
+
+# Test outputs
+test-output/
+*.gcov
+*.gcda
+*.gcno
+
+# Xcode (for macOS development)
+*.xcodeproj/
+*.xcworkspace/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+
+# Visual Studio (for Windows development)
+.vs/
+*.vcxproj.user
+*.sln.docstates
+Debug/
+Release/
+x64/
+x86/
+*.pdb
+*.ilk
+*.idb
+
+# Emscripten artifacts (if building for web)
+*.wasm
+*.js.mem
+*.html.mem
+
+# Backup files
+*.bak
+*.backup
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.temporary

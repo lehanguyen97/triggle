@@ -1,0 +1,15 @@
+[submodule "engine/vendor/glfw"]
+	path = engine/vendor/glfw
+	url = https://github.com/glfw/glfw.git
+[submodule "engine/vendor/sokol"]
+	path = engine/vendor/sokol
+	url = https://github.com/floooh/sokol
+[submodule "engine/vendor/cglm"]
+	path = engine/vendor/cglm
+	url = https://github.com/recp/cglm.git
+[submodule "engine/vendor/sokol-samples"]
+	path = engine/vendor/sokol-samples
+	url = https://github.com/floooh/sokol-samples
+[submodule "engine/vendor/cgltf"]
+	path = engine/vendor/cgltf
+	url = https://github.com/jkuhlmann/cgltf
