@@ -31,10 +31,10 @@ typedef union GEvent {
   GKeyboardEvent keyboard;
 } GEvent;
 
-game_t game_init(void* engine);
-int game_frame(double dt);
-int game_event(GEvent event);
-int game_cleanup();
+game_t game_init();
+int game_frame(game_t game, double dt);
+int game_event(game_t game, GEvent event);
+int game_cleanup(game_t game);
 
 #ifdef __cplusplus
 }

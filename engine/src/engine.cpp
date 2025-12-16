@@ -12,11 +12,15 @@
 
 engine_t engine_init() {
     engine_t e = new Engine {};
-    if (!e->init()) {
+    if (e->init() != 0) {
         delete e;
         return nullptr;
     }
     return e;
+}
+
+int engine_register_mesh(engine_t e, MeshData data) {
+    return e->register_mesh(data);
 }
 
 int engine_render(engine_t e, RenderArg arg) {
@@ -28,66 +32,70 @@ int engine_cleanup(engine_t e) {
 }
 
 int Engine::init() {
-    // Initialize Sokol
     sg_desc desc = {};
     desc.environment = get_environment();
     desc.logger.func = slog_func;
     sg_setup(&desc);
-    printf("Sokol initialized successfully!\n");
 
-    printf("before shader 0");
     const sg_shader_desc* shader_desc = color_shader_desc(sg_query_backend());
     sg_shader shd = sg_make_shader(shader_desc);
-    printf("after shader 0");
 
     // create pipeline object with depth testing
     sg_pipeline_desc pip_desc = {};
-    pip_desc.layout.attrs[0].format = SG_VERTEXFORMAT_FLOAT3;
-    pip_desc.layout.attrs[1].format = SG_VERTEXFORMAT_FLOAT4;
+    pip_desc.layout.attrs[ATTR_color_position].format = SG_VERTEXFORMAT_FLOAT3;
+    pip_desc.layout.attrs[ATTR_color_color].format = SG_VERTEXFORMAT_FLOAT4;
+    pip_desc.layout.buffers[0].stride = 28;
     pip_desc.shader = shd;
     pip_desc.index_type = SG_INDEXTYPE_UINT16;
     pip_desc.cull_mode = SG_CULLMODE_BACK;
+    pip_desc.depth.write_enabled = true;
+    pip_desc.depth.compare = SG_COMPAREFUNC_LESS_EQUAL;
     pip = sg_make_pipeline(&pip_desc);
 
     // pass action to clear to black
     pass_action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass_action.colors[0].clear_value = {0.0f, 0.0f, 0.0f, 1.0f};
+    pass_action.colors[0].clear_value = { 0.25f, 0.5f, 0.75f, 1.0f };
     return 0;
+}
+
+int Engine::register_mesh(MeshData data) {
+    sg_buffer_desc vbuf_desc = {};
+    vbuf_desc.data = sg_range { data.vertices, data.nv };
+    vbuf_desc.label = "cube_vertices";
+    sg_buffer vbuf = sg_make_buffer(&vbuf_desc);
+
+    sg_buffer_desc ibuf_desc = {};
+    ibuf_desc.usage.index_buffer = true;
+    ibuf_desc.data = sg_range { data.indices, data.ni };
+    ibuf_desc.label = "cube_indices";
+    sg_buffer ibuf = sg_make_buffer(&ibuf_desc);
+
+    sg_bindings bind = {};
+    bind.vertex_buffers[0] = vbuf;
+    bind.index_buffer = ibuf;
+
+    int bind_id = binds.size();
+    binds.emplace_back(bind);
+    return bind_id;
 }
 
 int Engine::render(RenderArg arg) {
     // didn't use shader params n here.
     vs_params_t vs_params {
         .mvp = *((mat4s*)arg.shader_params)
-        // mat4s {
-        //   arg.shader_params[0],arg.shader_params[1],arg.shader_params[2],arg.shader_params[3],
-        //   arg.shader_params[4],arg.shader_params[5],arg.shader_params[6],arg.shader_params[7],
-        //   arg.shader_params[8],arg.shader_params[9],arg.shader_params[10],arg.shader_params[11],
-        //   arg.shader_params[12],arg.shader_params[13],arg.shader_params[14],arg.shader_params[15],
-        // }
     };
 
     sg_pass pass = {};
     pass.action = pass_action;
     pass.swapchain = get_swapchain();
 
-    sg_buffer_desc vbuf_desc = {};
-    vbuf_desc.data = sg_range {&arg.vertices, arg.nv};
-    sg_buffer vbuf = sg_make_buffer(&vbuf_desc);
-
-    sg_buffer_desc ibuf_desc = {};
-    ibuf_desc.usage.index_buffer = true;
-    ibuf_desc.data = sg_range {&arg.indices, arg.ni};
-    sg_buffer ibuf = sg_make_buffer(&ibuf_desc);
-
-    bind.vertex_buffers[0] = vbuf;
-    bind.index_buffer = ibuf;
+    sg_bindings bind = binds[arg.bind_id];
 
     sg_begin_pass(&pass);
     sg_apply_pipeline(pip);
     sg_apply_bindings(&bind);
     sg_range uniform_data = SG_RANGE(vs_params);
-    sg_apply_uniforms(0, &uniform_data);
+    sg_apply_uniforms(UB_vs_params, &uniform_data);
     sg_draw(0, 36, 1);
     sg_end_pass();
     sg_commit();

@@ -10,11 +10,10 @@
 #include "e/game_api.h"
 #include "engine.hpp"
 
-engine_t engine = nullptr;
-game_t game = nullptr;
+static game_t game = nullptr;
 
-int width = 800;
-int height = 600;
+int width = 1280;
+int height = 720;
 
 sg_swapchain get_swapchain(void) {
     return sglue_swapchain();
@@ -25,13 +24,15 @@ sg_environment get_environment(void) {
 }
 
 void on_init(void) {
-    engine = engine_init();
-    game = game_init(engine);
+    game = game_init();
 }
 
 void on_frame(void) {
+    if (!game) {
+        return;
+    }
     double dt = sapp_frame_duration();
-    game_frame(dt);
+    game_frame(game, dt);
 }
 
 void on_event(const sapp_event* sev) {
@@ -73,7 +74,7 @@ void on_event(const sapp_event* sev) {
                 .is_down = sev->type == SAPP_EVENTTYPE_KEY_DOWN,
                 .is_repeat = sev->key_repeat,
             };
-            game_event(ev);
+            game_event(game, ev);
             break;
         }
         default:
@@ -82,7 +83,7 @@ void on_event(const sapp_event* sev) {
 }
 
 void on_cleanup(void) {
-    game_cleanup();
+    game_cleanup(game);
 }
 
 sapp_desc sokol_main(int argc, char* argv[]) {
