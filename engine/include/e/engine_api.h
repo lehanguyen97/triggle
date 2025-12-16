@@ -3,23 +3,21 @@
 extern "C" {
 #endif
 
-#include <cglm/struct.h>
+#include <stddef.h>
 
-typedef struct Engine *e_engine_t;
+typedef struct Engine* engine_t;
+typedef struct RenderArg {
+  float* vertices;
+  size_t nv;
+  int* indices;
+  size_t ni;
+  void* shader_params;
+  size_t ns;
+} RenderArg;
 
-typedef struct {
-  vec3s position;
-  vec3s rotation;
-  vec3s scale;
-} transform_t;
-
-typedef int8_t system_ret_t;
-typedef system_ret_t (*system_fn)(void *udata);
-
-int e_game_init(e_engine_t engine);
-int e_read_gltf(e_engine_t engine, const char *path);
-void e_register_system(e_engine_t engine, system_fn fn);
-void e_game_shutdown(void);
+engine_t engine_init();
+int engine_render(engine_t e, RenderArg arg);
+int engine_cleanup(engine_t e);
 
 #ifdef __cplusplus
 }

@@ -38,7 +38,7 @@ func update_rotation_system(data unsafe.Pointer) C.int8_t {
 }
 
 //export e_game_init
-func e_game_init(engine C.e_engine_t) C.int {
+func e_game_init(engine C.engine_t) C.int {
 	// Simplified initialization - no registry for now
 	// Register the C callback directly
 	C.e_register_system(engine, C.system_fn(C.update_rotation_system))
