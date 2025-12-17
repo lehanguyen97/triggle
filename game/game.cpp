@@ -76,6 +76,10 @@ struct Game {
     int register_mesh();
 };
 
+static Game* from_handle(game_t h) {
+    return reinterpret_cast<Game*>(h);
+}
+
 int Game::register_mesh() {
     MeshData data {
         vertices,
@@ -90,15 +94,19 @@ int Game::register_mesh() {
 game_t game_init() {
     engine_t e = engine_init();
     if (!e) {
-        return nullptr;
+        return 0;
     }
 
     Game* game = new Game {e};
     game->register_mesh();
-    return game;
+    return reinterpret_cast<game_t>(game);
 }
 
-int game_frame(game_t game, double dt) {
+int game_frame(game_t g, double dt) {
+    Game* game = from_handle(g);
+    if (!game) {
+        return -1;
+    }
     game->transform.rotation.x += dt;
     game->transform.rotation.y += 2 * dt;
 
@@ -123,10 +131,16 @@ int game_frame(game_t game, double dt) {
 }
 
 int game_event(game_t game, GEvent event) {
+    (void)game;
+    (void)event;
     return 0;
 }
 
 int game_cleanup(game_t game) {
-    delete game;
+    Game* g = from_handle(game);
+    if (!g) {
+        return 0;
+    }
+    delete g;
     return 0;
 }

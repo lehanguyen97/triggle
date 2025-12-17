@@ -10,6 +10,8 @@ compile_commands.json
 *.ninja
 .ninja_deps
 .ninja_log
+.gocache/
+.gopath/
 
 # CMake generated files
 CMakeUserPresets.json
@@ -28,8 +30,8 @@ CMakePresets.json
 *.dSYM/
 
 # Go build artifacts
-/game/libgame.a
-/game/libgame.h
+/game_go/libgame.a
+/game_go/libgame.h
 *.test
 *.prof
 

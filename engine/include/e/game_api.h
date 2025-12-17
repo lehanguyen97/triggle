@@ -3,7 +3,10 @@
 extern "C" {
 #endif
 
-typedef struct Game* game_t;
+#include <stdbool.h>
+#include <stdint.h>
+
+typedef uintptr_t game_t;
 
 typedef enum GEventType {
   G_EVENT_UNKNOWN,

@@ -11,24 +11,36 @@
 #include "shader.h"
 
 engine_t engine_init() {
-    engine_t e = new Engine {};
+    Engine* e = new Engine {};
     if (e->init() != 0) {
         delete e;
-        return nullptr;
+        return 0;
     }
-    return e;
+    return reinterpret_cast<engine_t>(e);
 }
 
 int engine_register_mesh(engine_t e, MeshData data) {
-    return e->register_mesh(data);
+    if (!e) {
+        return -1;
+    }
+    return reinterpret_cast<Engine*>(e)->register_mesh(data);
 }
 
 int engine_render(engine_t e, RenderArg arg) {
-    return e->render(arg);
+    if (!e) {
+        return -1;
+    }
+    return reinterpret_cast<Engine*>(e)->render(arg);
 }
 
 int engine_cleanup(engine_t e) {
-    return e->cleanup();
+    if (!e) {
+        return 0;
+    }
+    Engine* eng = reinterpret_cast<Engine*>(e);
+    int res = eng->cleanup();
+    delete eng;
+    return res;
 }
 
 int Engine::init() {
@@ -59,23 +71,49 @@ int Engine::init() {
 }
 
 int Engine::register_mesh(MeshData data) {
+    // Allocate and copy vertex data
+    float* owned_vertices = new float[data.nv / sizeof(float)];
+    if (!owned_vertices) {
+        return -1;
+    }
+    memcpy(owned_vertices, data.vertices, data.nv);
+
+    // Allocate and copy index data
+    uint16_t* owned_indices = new uint16_t[data.ni / sizeof(uint16_t)];
+    if (!owned_indices) {
+        delete[] owned_vertices;
+        return -1;
+    }
+    memcpy(owned_indices, data.indices, data.ni);
+
+    // Create sokol buffers with owned data
     sg_buffer_desc vbuf_desc = {};
-    vbuf_desc.data = sg_range { data.vertices, data.nv };
-    vbuf_desc.label = "cube_vertices";
+    vbuf_desc.data = sg_range { owned_vertices, data.nv };
+    vbuf_desc.label = "mesh_vertices";
     sg_buffer vbuf = sg_make_buffer(&vbuf_desc);
 
     sg_buffer_desc ibuf_desc = {};
     ibuf_desc.usage.index_buffer = true;
-    ibuf_desc.data = sg_range { data.indices, data.ni };
-    ibuf_desc.label = "cube_indices";
+    ibuf_desc.data = sg_range { owned_indices, data.ni };
+    ibuf_desc.label = "mesh_indices";
     sg_buffer ibuf = sg_make_buffer(&ibuf_desc);
 
+    // Store bindings
     sg_bindings bind = {};
     bind.vertex_buffers[0] = vbuf;
     bind.index_buffer = ibuf;
 
     int bind_id = binds.size();
     binds.emplace_back(bind);
+
+    // Store owned mesh data for later cleanup
+    MeshData owned_data;
+    owned_data.vertices = owned_vertices;
+    owned_data.nv = data.nv;
+    owned_data.indices = owned_indices;
+    owned_data.ni = data.ni;
+    mesh_data.emplace_back(owned_data);
+
     return bind_id;
 }
 
@@ -104,6 +142,19 @@ int Engine::render(RenderArg arg) {
 }
 
 int Engine::cleanup() {
+    // Free all owned mesh data
+    for (auto& mesh : mesh_data) {
+        if (mesh.vertices) {
+            delete[] mesh.vertices;
+            mesh.vertices = nullptr;
+        }
+        if (mesh.indices) {
+            delete[] mesh.indices;
+            mesh.indices = nullptr;
+        }
+    }
+    mesh_data.clear();
+    
     sg_shutdown();
     return 0;
 }

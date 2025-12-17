@@ -12,6 +12,8 @@ struct Engine {
     std::vector<sg_bindings> binds = {};
     sg_pass_action pass_action = {};
 
+    std::vector<MeshData> mesh_data = {};
+
     int init();
     int render(RenderArg arg);
     int cleanup();

@@ -6,7 +6,7 @@ extern "C" {
 #include <stdint.h>
 #include <stddef.h>
 
-typedef struct Engine* engine_t;
+typedef uintptr_t engine_t;
 
 typedef struct MeshData {
   float* vertices;

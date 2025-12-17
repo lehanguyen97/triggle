@@ -5,5 +5,6 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
+add_subdirectory(game_go)
 add_subdirectory(engine)
-add_subdirectory(game)
+# add_subdirectory(game)
