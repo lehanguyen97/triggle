@@ -10,7 +10,7 @@
 #include "e/game_api.h"
 #include "engine.hpp"
 
-static game_t game = nullptr;
+static game_t game = 0;
 
 int width = 1280;
 int height = 720;

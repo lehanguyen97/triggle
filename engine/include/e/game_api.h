@@ -35,9 +35,9 @@ typedef union GEvent {
 } GEvent;
 
 game_t game_init();
-int game_frame(game_t game, double dt);
-int game_event(game_t game, GEvent event);
-int game_cleanup(game_t game);
+int32_t game_frame(game_t game, double dt);
+int32_t game_event(game_t game, GEvent event);
+int32_t game_cleanup(game_t game);
 
 #ifdef __cplusplus
 }

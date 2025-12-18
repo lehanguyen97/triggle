@@ -14,10 +14,10 @@ struct Engine {
 
     std::vector<MeshData> mesh_data = {};
 
-    int init();
-    int render(RenderArg arg);
-    int cleanup();
+    int32_t init();
+    int32_t render(RenderArg arg);
+    int32_t cleanup();
 
-    int register_mesh(MeshData data);
-    int load_gltf(const char* path, const char* prefix);
+    int32_t register_mesh(MeshData data);
+    int32_t load_gltf(const char* path, const char* prefix);
 };

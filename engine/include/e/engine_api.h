@@ -16,15 +16,14 @@ typedef struct MeshData {
 } MeshData;
 
 typedef struct RenderArg {
-  int bind_id;
-  void* shader_params;
-  size_t ns;
+  int32_t bind_id;
+  uintptr_t shader_params;
 } RenderArg;
 
 engine_t engine_init();
-int engine_render(engine_t e, RenderArg arg);
-int engine_register_mesh(engine_t e, MeshData data);
-int engine_cleanup(engine_t e);
+int32_t engine_render(engine_t e, RenderArg arg);
+int32_t engine_register_mesh(engine_t e, MeshData data);
+int32_t engine_cleanup(engine_t e);
 
 #ifdef __cplusplus
 }

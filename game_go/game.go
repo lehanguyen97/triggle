@@ -1,85 +1,30 @@
 package main
 
-/*
-#cgo CFLAGS: -I../engine/include
-#include <stdint.h>
-#include <stddef.h>
-#include <e/engine_api.h>
-#include <e/game_api.h>
-*/
-import "C"
-
 import (
-	"runtime"
-	"runtime/cgo"
 	"unsafe"
 
 	mgl "github.com/go-gl/mathgl/mgl32"
 )
 
-type transform struct {
+type Transform struct {
 	position mgl.Vec3
 	rotation mgl.Vec3
 	scale    mgl.Vec3
 }
 
-type gameState struct {
-	engine     uintptr
-	transform  transform
+type Game struct {
+	engine     Engine
+	transform  Transform
 	viewProj   mgl.Mat4
-	mvp        [16]C.float
+	mvp        mgl.Mat4
 	vertices   []float32
 	indices    []uint16
-	cubeBindID C.int
+	cubeBindID int32
 }
 
-//export game_init
-func game_init() C.game_t {
-	g := newGameState()
-	if g == nil {
-		return C.game_t(0)
-	}
-
-	handle := cgo.NewHandle(g)
-	return C.game_t(handle)
-}
-
-//export game_frame
-func game_frame(game C.game_t, dt C.double) C.int {
-	g, handle := resolveHandle(game)
-	if g == nil {
-		return -1
-	}
-
-	g.update(float32(dt))
-	res := g.render()
-	runtimeKeepAlive(handle)
-	return res
-}
-
-//export game_event
-func game_event(game C.game_t, _ C.GEvent) C.int {
-	// No-op for now; return success so the engine keeps running.
-	_, handle := resolveHandle(game)
-	runtimeKeepAlive(handle)
-	return 0
-}
-
-//export game_cleanup
-func game_cleanup(game C.game_t) C.int {
-	g, handle := resolveHandle(game)
-	if g != nil {
-		g.cleanup()
-	}
-	if handle != 0 {
-		handle.Delete()
-	}
-	return 0
-}
-
-func newGameState() *gameState {
-	g := &gameState{
-		transform: transform{
+func newGameState() *Game {
+	g := &Game{
+		transform: Transform{
 			position: mgl.Vec3{0, 0, 0},
 			rotation: mgl.Vec3{0, 0, 0},
 			scale:    mgl.Vec3{1, 1, 1},
@@ -135,7 +80,7 @@ func newGameState() *gameState {
 	)
 	g.viewProj = proj.Mul4(view)
 
-	g.engine = uintptr(C.engine_init())
+	g.engine = NewEngine()
 	if g.engine == 0 {
 		return nil
 	}
@@ -148,19 +93,8 @@ func newGameState() *gameState {
 	return g
 }
 
-func (g *gameState) registerMesh() C.int {
-	vertBytes := C.size_t(len(g.vertices)) * C.size_t(C.sizeof_float)
-	idxBytes := C.size_t(len(g.indices)) * C.size_t(C.sizeof_uint16_t)
-
-	// Pass Go slice data directly - engine will make its own copy
-	data := C.MeshData{
-		vertices: (*C.float)(unsafe.Pointer(&g.vertices[0])),
-		nv:       vertBytes,
-		indices:  (*C.uint16_t)(unsafe.Pointer(&g.indices[0])),
-		ni:       idxBytes,
-	}
-
-	bindID := C.engine_register_mesh(C.engine_t(g.engine), data)
+func (g *Game) registerMesh() int32 {
+	bindID := g.engine.RegisterMesh(g.vertices, g.indices)
 	if bindID < 0 {
 		return -1
 	}
@@ -168,7 +102,7 @@ func (g *gameState) registerMesh() C.int {
 	return 0
 }
 
-func (g *gameState) update(dt float32) {
+func (g *Game) update(dt float32) int32 {
 	g.transform.rotation[0] += dt
 	g.transform.rotation[1] += 2 * dt
 
@@ -183,26 +117,16 @@ func (g *gameState) update(dt float32) {
 	model[13] = g.transform.position[1]
 	model[14] = g.transform.position[2]
 
-	mvp := model.Mul4(g.viewProj)
-	for i := 0; i < 16; i++ {
-		g.mvp[i] = C.float(mvp[i])
-	}
+	g.mvp = model.Mul4(g.viewProj)
+	return g.engine.Render(g.cubeBindID, uintptr(unsafe.Pointer(&g.mvp[0])))
 }
 
-func (g *gameState) render() C.int {
-	arg := C.RenderArg{
-		bind_id:       g.cubeBindID,
-		shader_params: unsafe.Pointer(&g.mvp[0]),
-		ns:            C.size_t(16),
+func (g *Game) cleanup() int32 {
+	if result := g.engine.CleanUp(); result != 0 {
+		return result
 	}
-	return C.engine_render(C.engine_t(g.engine), arg)
-}
-
-func (g *gameState) cleanup() {
-	if g.engine != 0 {
-		C.engine_cleanup(C.engine_t(g.engine))
-		g.engine = 0
-	}
+	g.engine = 0
+	return 0
 }
 
 func eulerXYZ(rot mgl.Vec3) mgl.Mat4 {
@@ -211,28 +135,6 @@ func eulerXYZ(rot mgl.Vec3) mgl.Mat4 {
 	m = m.Mul4(mgl.HomogRotate3DY(rot[1]))
 	m = m.Mul4(mgl.HomogRotate3DZ(rot[2]))
 	return m
-}
-
-func resolveHandle(game C.game_t) (*gameState, cgo.Handle) {
-	if game == 0 {
-		return nil, cgo.Handle(0)
-	}
-	h := cgo.Handle(game)
-	if h == 0 {
-		return nil, cgo.Handle(0)
-	}
-	val := h.Value()
-	g, ok := val.(*gameState)
-	if !ok {
-		return nil, h
-	}
-	return g, h
-}
-
-func runtimeKeepAlive(h cgo.Handle) {
-	if h != 0 {
-		runtime.KeepAlive(h)
-	}
 }
 
 func main() {}

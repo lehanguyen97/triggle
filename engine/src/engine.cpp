@@ -19,21 +19,21 @@ engine_t engine_init() {
     return reinterpret_cast<engine_t>(e);
 }
 
-int engine_register_mesh(engine_t e, MeshData data) {
+int32_t engine_register_mesh(engine_t e, MeshData data) {
     if (!e) {
         return -1;
     }
     return reinterpret_cast<Engine*>(e)->register_mesh(data);
 }
 
-int engine_render(engine_t e, RenderArg arg) {
+int32_t engine_render(engine_t e, RenderArg arg) {
     if (!e) {
         return -1;
     }
     return reinterpret_cast<Engine*>(e)->render(arg);
 }
 
-int engine_cleanup(engine_t e) {
+int32_t engine_cleanup(engine_t e) {
     if (!e) {
         return 0;
     }
@@ -43,7 +43,7 @@ int engine_cleanup(engine_t e) {
     return res;
 }
 
-int Engine::init() {
+int32_t Engine::init() {
     sg_desc desc = {};
     desc.environment = get_environment();
     desc.logger.func = slog_func;
@@ -70,16 +70,16 @@ int Engine::init() {
     return 0;
 }
 
-int Engine::register_mesh(MeshData data) {
+int32_t Engine::register_mesh(MeshData data) {
     // Allocate and copy vertex data
-    float* owned_vertices = new float[data.nv / sizeof(float)];
+    float* owned_vertices = new float[data.nv];
     if (!owned_vertices) {
         return -1;
     }
     memcpy(owned_vertices, data.vertices, data.nv);
 
     // Allocate and copy index data
-    uint16_t* owned_indices = new uint16_t[data.ni / sizeof(uint16_t)];
+    uint16_t* owned_indices = new uint16_t[data.ni];
     if (!owned_indices) {
         delete[] owned_vertices;
         return -1;
@@ -117,7 +117,7 @@ int Engine::register_mesh(MeshData data) {
     return bind_id;
 }
 
-int Engine::render(RenderArg arg) {
+int32_t Engine::render(RenderArg arg) {
     // didn't use shader params n here.
     vs_params_t vs_params {
         .mvp = *((mat4s*)arg.shader_params)
@@ -141,7 +141,7 @@ int Engine::render(RenderArg arg) {
     return 0;
 }
 
-int Engine::cleanup() {
+int32_t Engine::cleanup() {
     // Free all owned mesh data
     for (auto& mesh : mesh_data) {
         if (mesh.vertices) {
@@ -159,7 +159,7 @@ int Engine::cleanup() {
     return 0;
 }
 
-int Engine::load_gltf(const char* path, const char* prefix) {
+int32_t Engine::load_gltf(const char* path, const char* prefix) {
     // Load GLTF file
     cgltf_options options = {};
     cgltf_data* data = nullptr;
