@@ -67,11 +67,11 @@ struct Game {
         glm_rad(60.0f), 1280.0f / 720.0f, 0.01f, 10.0f
     );
     mat4s view = glms_lookat(
-        vec3s {0.0f, 1.5f, 6.0f},
+        vec3s {0.0f, 1.5f, 4.0f},
         vec3s {0.0f, 0.0f, 0.0f},
         vec3s {0.0f, 1.0f, 0.0f}
     );
-    mat4s view_proj = glms_mul(proj, view);
+    mat4s view_proj = glms_mul(view, proj);
 
     int register_mesh();
 };
@@ -110,11 +110,9 @@ int game_frame(game_t g, double dt) {
     game->transform.rotation.x += dt;
     game->transform.rotation.y += 2 * dt;
 
-    mat4s model = glms_euler_xyz(game->transform.rotation);
-    glms_scale(model, game->transform.scale);
-    model.m03 = game->transform.position.x;
-    model.m13 = game->transform.position.y;
-    model.m23 = game->transform.position.z;
+    mat4s rxm = glms_rotate_x(glms_mat4_identity(), game->transform.rotation.x);
+    mat4s rym = glms_rotate_y(glms_mat4_identity(), game->transform.rotation.y);
+    mat4s model = glms_mul(rym, rxm);
 
     mat4s mvp = glms_mul(model, game->view_proj);
 
@@ -122,8 +120,7 @@ int game_frame(game_t g, double dt) {
         game->engine,
         RenderArg {
             game->cube_bind_id,
-            &mvp,
-            16, // not important
+            reinterpret_cast<uintptr_t>(&mvp),
         }
     );
 
