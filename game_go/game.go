@@ -78,7 +78,7 @@ func newGameState() *Game {
 		mgl.Vec3{0.0, 0.0, 0.0},
 		mgl.Vec3{0.0, 1.0, 0.0},
 	)
-	g.viewProj = view.Mul4(proj)
+	g.viewProj = proj.Mul4(view)
 
 	g.engine = NewEngine()
 	if g.engine == 0 {
@@ -108,9 +108,9 @@ func (g *Game) update(dt float32) int32 {
 
 	rxm := mgl.HomogRotate3DX(g.transform.rotation[0])
 	rym := mgl.HomogRotate3DY(g.transform.rotation[1])
-	model := rym.Mul4(rxm)
+	model := rxm.Mul4(rym)
 
-	g.mvp = model.Mul4(g.viewProj)
+	g.mvp = g.viewProj.Mul4(model)
 	return g.engine.Render(g.cubeBindID, uintptr(unsafe.Pointer(&g.mvp[0])))
 }
 
