@@ -72,9 +72,9 @@ func newGameState() *Game {
 		22, 21, 20, 23, 22, 20,
 	}
 
-	proj := mgl.Perspective(mgl.DegToRad(60.0), 1280.0/720.0, 0.01, 10.0)
+	proj := mgl.Perspective(mgl.DegToRad(60.0), 800.0/600.0, 0.01, 10.0)
 	view := mgl.LookAtV(
-		mgl.Vec3{0.0, 1.5, 4.0},
+		mgl.Vec3{0.0, 1.5, 6.0},
 		mgl.Vec3{0.0, 0.0, 0.0},
 		mgl.Vec3{0.0, 1.0, 0.0},
 	)

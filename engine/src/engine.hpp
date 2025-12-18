@@ -9,7 +9,7 @@ sg_environment get_environment(void);
 
 struct Engine {
     sg_pipeline pip = {};
-    std::vector<sg_bindings> binds = {};
+    std::vector<sg_bindings*> binds = {};
     sg_pass_action pass_action = {};
 
     std::vector<MeshData> mesh_data = {};

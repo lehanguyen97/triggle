@@ -12,8 +12,8 @@
 
 static game_t game = 0;
 
-int width = 1280;
-int height = 720;
+int width = 800;
+int height = 600;
 
 sg_swapchain get_swapchain(void) {
     return sglue_swapchain();
