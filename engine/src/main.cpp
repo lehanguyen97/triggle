@@ -10,7 +10,7 @@
 #include "e/game_api.h"
 #include "engine.hpp"
 
-static game_t game = 0;
+static game_t game = -1;
 
 int width = 800;
 int height = 600;
@@ -25,12 +25,12 @@ sg_environment get_environment(void) {
 
 void on_init(void) {
     game = game_init();
+    if (game != 0) {
+        fprintf(stderr, "game_init return error");
+    }
 }
 
 void on_frame(void) {
-    if (!game) {
-        return;
-    }
     double dt = sapp_frame_duration();
     game_frame(game, dt);
 }

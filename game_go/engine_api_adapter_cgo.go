@@ -1,3 +1,5 @@
+//go:build !js && !wasm
+
 package main
 
 /*
@@ -8,12 +10,14 @@ package main
 #include <e/game_api.h>
 */
 import "C"
-import "unsafe"
+import (
+	"unsafe"
+)
 
 type MeshData struct {
-	vertices *float32
+	vertices unsafe.Pointer
 	nv       uint
-	indices  *uint16
+	indices  unsafe.Pointer
 	ni       uint
 }
 
@@ -22,17 +26,19 @@ type RenderArg struct {
 	shaderParams uintptr
 }
 
-type Engine uintptr
+type Engine int32
 
 func NewEngine() Engine {
 	return Engine(C.engine_init())
 }
 
 func (e Engine) RegisterMesh(vertices []float32, indices []uint16) int32 {
+	cVertices := C.CBytes(unsafe.Slice((*byte)(unsafe.Pointer(&vertices[0])), len(vertices)*4))
+	cIndices := C.CBytes(unsafe.Slice((*byte)(unsafe.Pointer(&indices[0])), len(indices)*2))
 	data := MeshData{
-		vertices: &vertices[:1][0],
+		vertices: cVertices,
 		nv:       uint(len(vertices)),
-		indices:  &indices[:1][0],
+		indices:  cIndices,
 		ni:       uint(len(indices)),
 	}
 	return int32(C.engine_register_mesh(C.engine_t(e), *(*C.MeshData)(unsafe.Pointer(&data))))

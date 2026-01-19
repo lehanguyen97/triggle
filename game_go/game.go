@@ -22,7 +22,7 @@ type Game struct {
 	cubeBindID int32
 }
 
-func newGameState() *Game {
+func newGame() *Game {
 	g := &Game{
 		transform: Transform{
 			position: mgl.Vec3{0, 0, 0},
@@ -81,7 +81,7 @@ func newGameState() *Game {
 	g.viewProj = proj.Mul4(view)
 
 	g.engine = NewEngine()
-	if g.engine == 0 {
+	if g.engine != 0 {
 		return nil
 	}
 

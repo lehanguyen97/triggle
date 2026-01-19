@@ -6,7 +6,7 @@ extern "C" {
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef uintptr_t game_t;
+typedef int32_t game_t;
 
 typedef enum GEventType {
   G_EVENT_UNKNOWN,

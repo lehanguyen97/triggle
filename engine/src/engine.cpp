@@ -4,44 +4,9 @@
 
 #include <cglm/struct.h>
 #include <cgltf.h>
-#include <e/engine_api.h>
 #include <sokol_log.h>
-#include <stdio.h>
 
 #include "shader.h"
-
-engine_t engine_init() {
-    Engine* e = new Engine {};
-    if (e->init() != 0) {
-        delete e;
-        return 0;
-    }
-    return reinterpret_cast<engine_t>(e);
-}
-
-int32_t engine_register_mesh(engine_t e, MeshData data) {
-    if (!e) {
-        return -1;
-    }
-    return reinterpret_cast<Engine*>(e)->register_mesh(data);
-}
-
-int32_t engine_render(engine_t e, RenderArg arg) {
-    if (!e) {
-        return -1;
-    }
-    return reinterpret_cast<Engine*>(e)->render(arg);
-}
-
-int32_t engine_cleanup(engine_t e) {
-    if (!e) {
-        return 0;
-    }
-    Engine* eng = reinterpret_cast<Engine*>(e);
-    int res = eng->cleanup();
-    delete eng;
-    return res;
-}
 
 int32_t Engine::init() {
     sg_desc desc = {};
@@ -66,40 +31,41 @@ int32_t Engine::init() {
 
     // pass action to clear to black
     pass_action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass_action.colors[0].clear_value = { 0.25f, 0.5f, 0.75f, 1.0f };
+    pass_action.colors[0].clear_value = {0.25f, 0.5f, 0.75f, 1.0f};
     return 0;
 }
 
 int32_t Engine::register_mesh(MeshData data) {
     // Allocate and copy vertex data
-    float* vertices = new float[data.nv];
-    if (!vertices) {
-        return -1;
-    }
-    memcpy(vertices, data.vertices, data.nv * sizeof(float));
+    // float* vertices = new float[data.nv];
+    // if (!vertices) {
+    //     return -1;
+    // }
+    // memcpy(vertices, data.vertices, data.nv * sizeof(float));
 
     // Allocate and copy index data
-    uint16_t* indices = new uint16_t[data.ni];
-    if (!indices) {
-        delete[] vertices;
-        return -1;
-    }
-    memcpy(indices, data.indices, data.ni * sizeof(uint16_t));
+    // uint16_t* indices = new uint16_t[data.ni];
+    // if (!indices) {
+    //     delete[] vertices;
+    //     return -1;
+    // }
+    // memcpy(indices, data.indices, data.ni * sizeof(uint16_t));
+    fprintf(stderr, "In register mesh\n");
 
     // Create sokol buffers with owned data
     sg_buffer_desc vbuf_desc = {};
-    vbuf_desc.data = sg_range { vertices, data.nv * sizeof(float) };
+    vbuf_desc.data = sg_range {data.vertices, data.nv * sizeof(float)};
     vbuf_desc.label = "mesh_vertices";
     sg_buffer vbuf = sg_make_buffer(&vbuf_desc);
 
     sg_buffer_desc ibuf_desc = {};
     ibuf_desc.usage.index_buffer = true;
-    ibuf_desc.data = sg_range { indices, data.ni * sizeof(uint16_t) };
+    ibuf_desc.data = sg_range {data.indices, data.ni * sizeof(uint16_t)};
     ibuf_desc.label = "mesh_indices";
     sg_buffer ibuf = sg_make_buffer(&ibuf_desc);
 
     // Store bindings
-    sg_bindings* bind = new sg_bindings{};
+    sg_bindings* bind = new sg_bindings {};
     bind->vertex_buffers[0] = vbuf;
     bind->index_buffer = ibuf;
 
@@ -108,9 +74,9 @@ int32_t Engine::register_mesh(MeshData data) {
 
     // Store owned mesh data for later cleanup
     MeshData owned_data;
-    owned_data.vertices = vertices;
+    owned_data.vertices = data.vertices;
     owned_data.nv = data.nv;
-    owned_data.indices = indices;
+    owned_data.indices = data.indices;
     owned_data.ni = data.ni;
     mesh_data.emplace_back(owned_data);
 
@@ -119,9 +85,7 @@ int32_t Engine::register_mesh(MeshData data) {
 
 int32_t Engine::render(RenderArg arg) {
     // didn't use shader params n here.
-    vs_params_t vs_params {
-        .mvp = *((mat4s*)arg.shader_params)
-    };
+    vs_params_t vs_params {.mvp = *((mat4s*)arg.shader_params)};
 
     sg_pass pass = {};
     pass.action = pass_action;
@@ -154,7 +118,7 @@ int32_t Engine::cleanup() {
         }
     }
     mesh_data.clear();
-    
+
     sg_shutdown();
     return 0;
 }
