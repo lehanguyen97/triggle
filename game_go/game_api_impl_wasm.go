@@ -22,16 +22,21 @@ func game_frame(g int32, dt float64) int32 {
 }
 
 //go:wasmexport game_event
-func game_event(g int32, evType int32, keyCode int32, isDown int32, isRepeat int32) int32 {
+func game_event(g int32,
+	evType int32, keyOrBtn int32,
+	isDown int32, isRepeat int32,
+	mouseX float32, mouseY float32,
+	scrollX float32, scrollY float32,
+	winW int32, winH int32) int32 {
 	if g != 0 {
 		return -1
 	}
-	// TODO: handle events
-	_ = evType
-	_ = keyCode
-	_ = isDown
-	_ = isRepeat
-	return 0
+	return game.handleEvent(
+		evType, keyOrBtn,
+		isDown, isRepeat,
+		mouseX, mouseY,
+		scrollX, scrollY,
+		winW, winH)
 }
 
 //go:wasmexport game_cleanup

@@ -29,12 +29,21 @@ func game_frame(g C.game_t, dt C.double) C.int {
 }
 
 //export game_event
-func game_event(g C.game_t, ev C.GEvent) C.int {
+func game_event(g C.game_t,
+	evType C.int, keyOrBtn C.int,
+	isDown C.int, isRepeat C.int,
+	mouseX C.float, mouseY C.float,
+	scrollX C.float, scrollY C.float,
+	winW C.int, winH C.int) C.int {
 	if g != 0 {
 		return -1
 	}
-	// TODO: handle events
-	return 0
+	return C.int(game.handleEvent(
+		int32(evType), int32(keyOrBtn),
+		int32(isDown), int32(isRepeat),
+		float32(mouseX), float32(mouseY),
+		float32(scrollX), float32(scrollY),
+		int32(winW), int32(winH)))
 }
 
 //export game_cleanup

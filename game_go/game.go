@@ -1,9 +1,29 @@
 package main
 
 import (
+	"math"
 	"unsafe"
 
 	mgl "github.com/go-gl/mathgl/mgl32"
+)
+
+// Event types (match game_api.h)
+const (
+	EvUnknown     = 0
+	EvKeyDown     = 1
+	EvKeyUp       = 2
+	EvMouseDown   = 3
+	EvMouseUp     = 4
+	EvMouseMove   = 5
+	EvMouseScroll = 6
+	EvResize      = 7
+)
+
+// Mouse buttons
+const (
+	MouseLeft   = 0
+	MouseRight  = 1
+	MouseMiddle = 2
 )
 
 type Game struct {
@@ -24,7 +44,11 @@ type Game struct {
 	cubeMesh  int32
 	planeMesh int32
 
-	// Camera
+	// Camera (orbit)
+	camDist  float32
+	camYaw   float32 // radians
+	camPitch float32 // radians
+	camTarget mgl.Vec3
 	viewProj  mgl.Mat4
 	cameraPos mgl.Vec3
 
@@ -35,6 +59,15 @@ type Game struct {
 
 	// Transform
 	rotation float32
+
+	// Input
+	winW, winH     int32
+	mouseX, mouseY float32
+	mouseDown      bool
+	dragLastX      float32
+	dragLastY      float32
+	dragDist       float32 // accumulated drag distance — distinguishes click from drag
+	cubeClicked    bool
 
 	// Pre-allocated uniform buffers in engine memory
 	vsUniformPtr     Ptr // 192 bytes (3x mat4)
@@ -88,11 +121,14 @@ func newGame() *Game {
 	g.cubeMesh = UploadMesh(g.engine, cubeVertices(), cubeIndices())
 	g.planeMesh = UploadMesh(g.engine, planeVertices(), planeIndices())
 
-	// Camera
-	proj := mgl.Perspective(mgl.DegToRad(60.0), 800.0/600.0, 0.01, 50.0)
-	g.cameraPos = mgl.Vec3{0.0, 5.0, 8.0}
-	view := mgl.LookAtV(g.cameraPos, mgl.Vec3{0, 0, 0}, mgl.Vec3{0, 1, 0})
-	g.viewProj = proj.Mul4(view)
+	// Camera (orbit)
+	g.camDist = 10.0
+	g.camYaw = 0.0
+	g.camPitch = 0.5 // ~30 degrees
+	g.camTarget = mgl.Vec3{0, 0, 0}
+	g.winW = 800
+	g.winH = 600
+	g.updateCamera()
 
 	// Light — directional from upper right
 	g.lightDir = mgl.Vec3{0.5, -1.0, 0.5}
@@ -121,7 +157,9 @@ type drawObj struct {
 }
 
 func (g *Game) update(dt float32) int32 {
-	g.rotation += dt
+	if !g.cubeClicked {
+		g.rotation += dt
+	}
 
 	cubeModel := mgl.HomogRotate3DY(g.rotation).Mul4(mgl.Translate3D(0, 1, 0))
 	planeModel := mgl.Scale3D(10, 1, 10)
@@ -159,9 +197,13 @@ func (g *Game) update(dt float32) int32 {
 		g.engine.ApplyUniforms(0, g.vsUniformPtr, 192)
 
 		// FS uniforms: lightDir(12) + ambient(12) + cameraPos(12) = 36
+		amb := g.ambient
+		if g.cubeClicked && obj.mesh == g.cubeMesh {
+			amb = mgl.Vec3{0.5, 0.8, 0.5} // green tint when selected
+		}
 		fsData := [9]float32{
 			g.lightDir[0], g.lightDir[1], g.lightDir[2],
-			g.ambient[0], g.ambient[1], g.ambient[2],
+			amb[0], amb[1], amb[2],
 			g.cameraPos[0], g.cameraPos[1], g.cameraPos[2],
 		}
 		g.engine.BulkCopy(g.fsUniformPtr, unsafe.Pointer(&fsData[0]), 36)
@@ -180,6 +222,151 @@ func (g *Game) cleanup() int32 {
 	g.engine.Free(g.fsUniformPtr)
 	g.engine.Free(g.shadowUniformPtr)
 	return g.engine.Cleanup()
+}
+
+func (g *Game) updateCamera() {
+	cy := float32(math.Cos(float64(g.camYaw)))
+	sy := float32(math.Sin(float64(g.camYaw)))
+	cp := float32(math.Cos(float64(g.camPitch)))
+	sp := float32(math.Sin(float64(g.camPitch)))
+
+	g.cameraPos = mgl.Vec3{
+		g.camTarget[0] + g.camDist*cp*sy,
+		g.camTarget[1] + g.camDist*sp,
+		g.camTarget[2] + g.camDist*cp*cy,
+	}
+
+	aspect := float32(g.winW) / float32(g.winH)
+	if aspect < 0.1 {
+		aspect = 800.0 / 600.0
+	}
+	proj := mgl.Perspective(mgl.DegToRad(60.0), aspect, 0.01, 100.0)
+	view := mgl.LookAtV(g.cameraPos, g.camTarget, mgl.Vec3{0, 1, 0})
+	g.viewProj = proj.Mul4(view)
+}
+
+func (g *Game) handleEvent(
+	evType, keyOrBtn, isDown, isRepeat int32,
+	mouseX, mouseY, scrollX, scrollY float32,
+	winW, winH int32,
+) int32 {
+	if winW > 0 && winH > 0 {
+		g.winW = winW
+		g.winH = winH
+	}
+
+	switch evType {
+	case EvMouseDown:
+		g.mouseX = mouseX
+		g.mouseY = mouseY
+		if keyOrBtn == MouseLeft {
+			g.mouseDown = true
+			g.dragLastX = mouseX
+			g.dragLastY = mouseY
+			g.dragDist = 0
+		}
+	case EvMouseUp:
+		if keyOrBtn == MouseLeft {
+			if g.mouseDown && g.dragDist < 5.0 {
+				g.doClick(mouseX, mouseY)
+			}
+			g.mouseDown = false
+		}
+	case EvMouseMove:
+		g.mouseX = mouseX
+		g.mouseY = mouseY
+		if g.mouseDown {
+			dx := mouseX - g.dragLastX
+			dy := mouseY - g.dragLastY
+			g.dragDist += float32(math.Abs(float64(dx)) + math.Abs(float64(dy)))
+			if g.dragDist >= 5.0 {
+				g.camYaw -= dx * 0.005
+				g.camPitch += dy * 0.005
+				if g.camPitch > 1.5 {
+					g.camPitch = 1.5
+				}
+				if g.camPitch < -0.2 {
+					g.camPitch = -0.2
+				}
+				g.updateCamera()
+			}
+			g.dragLastX = mouseX
+			g.dragLastY = mouseY
+		}
+	case EvMouseScroll:
+		g.camDist -= scrollY * 0.5
+		if g.camDist < 2.0 {
+			g.camDist = 2.0
+		}
+		if g.camDist > 30.0 {
+			g.camDist = 30.0
+		}
+		g.updateCamera()
+	case EvResize:
+		if winW > 0 && winH > 0 {
+			g.winW = winW
+			g.winH = winH
+			g.updateCamera()
+		}
+	}
+	return 0
+}
+
+func (g *Game) doClick(sx, sy float32) {
+	r := g.screenToRay(sx, sy)
+	// Transform ray into cube's local space for OBB test
+	cubeModel := mgl.HomogRotate3DY(g.rotation).Mul4(mgl.Translate3D(0, 1, 0))
+	invModel := cubeModel.Inv()
+	localOrigin4 := invModel.Mul4x1(mgl.Vec4{r.origin[0], r.origin[1], r.origin[2], 1})
+	localDir4 := invModel.Mul4x1(mgl.Vec4{r.dir[0], r.dir[1], r.dir[2], 0})
+	localRay := ray{
+		origin: mgl.Vec3{localOrigin4[0], localOrigin4[1], localOrigin4[2]},
+		dir:    mgl.Vec3{localDir4[0], localDir4[1], localDir4[2]}.Normalize(),
+	}
+	if rayAABB(localRay, mgl.Vec3{-1, -1, -1}, mgl.Vec3{1, 1, 1}) {
+		g.cubeClicked = !g.cubeClicked
+	}
+}
+
+type ray struct {
+	origin mgl.Vec3
+	dir    mgl.Vec3
+}
+
+func (g *Game) screenToRay(sx, sy float32) ray {
+	// NDC
+	nx := 2.0*sx/float32(g.winW) - 1.0
+	ny := 1.0 - 2.0*sy/float32(g.winH)
+
+	inv := g.viewProj.Inv()
+	near := inv.Mul4x1(mgl.Vec4{nx, ny, -1, 1})
+	far := inv.Mul4x1(mgl.Vec4{nx, ny, 1, 1})
+	near3 := mgl.Vec3{near[0] / near[3], near[1] / near[3], near[2] / near[3]}
+	far3 := mgl.Vec3{far[0] / far[3], far[1] / far[3], far[2] / far[3]}
+	dir := far3.Sub(near3).Normalize()
+	return ray{origin: near3, dir: dir}
+}
+
+func rayAABB(r ray, bmin, bmax mgl.Vec3) bool {
+	var tmin, tmax float32 = -1e30, 1e30
+	for i := 0; i < 3; i++ {
+		if r.dir[i] != 0 {
+			t1 := (bmin[i] - r.origin[i]) / r.dir[i]
+			t2 := (bmax[i] - r.origin[i]) / r.dir[i]
+			if t1 > t2 {
+				t1, t2 = t2, t1
+			}
+			if t1 > tmin {
+				tmin = t1
+			}
+			if t2 < tmax {
+				tmax = t2
+			}
+		} else if r.origin[i] < bmin[i] || r.origin[i] > bmax[i] {
+			return false
+		}
+	}
+	return tmin <= tmax && tmax >= 0
 }
 
 func main() {}
