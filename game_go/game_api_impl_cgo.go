@@ -1,14 +1,13 @@
+//go:build !js && !wasip1
+
 package main
 
 /*
 #cgo CFLAGS: -I../engine/include
 #include <stdint.h>
-#include <stddef.h>
-#include <e/engine_api.h>
 #include <e/game_api.h>
 */
 import "C"
-import "fmt"
 
 var game *Game
 
@@ -18,7 +17,6 @@ func game_init() C.game_t {
 	if game == nil {
 		return -1
 	}
-
 	return 0
 }
 
@@ -31,10 +29,11 @@ func game_frame(g C.game_t, dt C.double) C.int {
 }
 
 //export game_event
-func game_event(g C.game_t, _ C.GEvent) C.int {
+func game_event(g C.game_t, ev C.GEvent) C.int {
 	if g != 0 {
 		return -1
 	}
+	// TODO: handle events
 	return 0
 }
 
@@ -46,9 +45,7 @@ func game_cleanup(g C.game_t) C.int {
 	if game == nil {
 		return 0
 	}
-	if result := game.cleanup(); result != 0 {
-		game = nil
-		return C.int(result)
-	}
-	return 0
+	result := game.cleanup()
+	game = nil
+	return C.int(result)
 }
