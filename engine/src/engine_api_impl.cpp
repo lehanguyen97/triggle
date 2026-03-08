@@ -312,8 +312,6 @@ EXPORT pipeline_t engine_pipeline_create(engine_t et, void* desc_data, int32_t d
     } else {
         desc.color_count = color_count;
     }
-    printf("pipeline_create: color_count=%d colors[0].pixel_format=%d\n", desc.color_count, desc.colors[0].pixel_format);
-
     sg_pipeline pip = sg_make_pipeline(&desc);
     pipeline_t id = (pipeline_t)e->pipelines.size();
     e->pipelines.push_back(pip);
@@ -412,7 +410,6 @@ EXPORT void engine_pass_begin(engine_t et, pass_t p, float clear_depth) {
     }
     pass.action.depth.load_action = SG_LOADACTION_CLEAR;
     pass.action.depth.clear_value = clear_depth;
-    printf("pass_begin offscreen: ds_view.id=%u\n", pass.attachments.depth_stencil.id);
     sg_begin_pass(&pass);
 }
 
@@ -427,7 +424,6 @@ EXPORT void engine_pass_begin_default(engine_t et,
     pass.action.colors[0].clear_value = {r, g, b, a};
     pass.action.depth.load_action = SG_LOADACTION_CLEAR;
     pass.action.depth.clear_value = depth;
-    printf("pass_begin_default: swapchain w=%d h=%d\n", pass.swapchain.width, pass.swapchain.height);
     sg_begin_pass(&pass);
 }
 
@@ -444,7 +440,6 @@ EXPORT void engine_commit(engine_t et) {
 EXPORT void engine_apply_pipeline(engine_t et, pipeline_t p) {
     if (!e || et != 0) return;
     if (p < 0 || p >= (pipeline_t)e->pipelines.size()) return;
-    printf("apply_pipeline: id=%d\n", p);
     sg_apply_pipeline(e->pipelines[p]);
     e->current_bindings = {};
 }
