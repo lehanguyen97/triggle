@@ -100,12 +100,14 @@ void on_event(const sapp_event* sev) {
         case SAPP_EVENTTYPE_MOUSE_UP: {
             int32_t type = sev->type == SAPP_EVENTTYPE_MOUSE_DOWN ? G_EVENT_MOUSE_DOWN : G_EVENT_MOUSE_UP;
             int32_t btn = (int32_t)sev->mouse_button;
-            game_event(game, type, btn, 0, 0,
+            int32_t mods = (int32_t)sev->modifiers;
+            game_event(game, type, btn, mods, 0,
                 sev->mouse_x, sev->mouse_y, 0, 0, w, h);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
-            game_event(game, G_EVENT_MOUSE_MOVE, 0, 0, 0,
+            int32_t mods = (int32_t)sev->modifiers;
+            game_event(game, G_EVENT_MOUSE_MOVE, 0, mods, 0,
                 sev->mouse_x, sev->mouse_y, 0, 0, w, h);
             break;
         }

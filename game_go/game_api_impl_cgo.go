@@ -46,6 +46,30 @@ func game_event(g C.game_t,
 		int32(winW), int32(winH)))
 }
 
+//export game_get_score
+func game_get_score(player C.int) C.int {
+	if game == nil || int(player) >= game.board.NumPlayers {
+		return 0
+	}
+	return C.int(game.board.Scores[player])
+}
+
+//export game_get_current_player
+func game_get_current_player() C.int {
+	if game == nil {
+		return 0
+	}
+	return C.int(game.board.CurrentPlayer)
+}
+
+//export game_get_num_players
+func game_get_num_players() C.int {
+	if game == nil {
+		return 0
+	}
+	return C.int(game.board.NumPlayers)
+}
+
 //export game_cleanup
 func game_cleanup(g C.game_t) C.int {
 	if g != 0 {

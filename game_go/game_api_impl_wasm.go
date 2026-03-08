@@ -39,6 +39,30 @@ func game_event(g int32,
 		winW, winH)
 }
 
+//go:wasmexport game_get_score
+func game_get_score(player int32) int32 {
+	if game == nil || int(player) >= game.board.NumPlayers {
+		return 0
+	}
+	return int32(game.board.Scores[player])
+}
+
+//go:wasmexport game_get_current_player
+func game_get_current_player() int32 {
+	if game == nil {
+		return 0
+	}
+	return int32(game.board.CurrentPlayer)
+}
+
+//go:wasmexport game_get_num_players
+func game_get_num_players() int32 {
+	if game == nil {
+		return 0
+	}
+	return int32(game.board.NumPlayers)
+}
+
 //go:wasmexport game_cleanup
 func game_cleanup(g int32) int32 {
 	if g != 0 {

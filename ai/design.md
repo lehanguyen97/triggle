@@ -12,7 +12,7 @@ game_event(g, evType, keyOrBtn, isDown, isRepeat, mouseX, mouseY, scrollX, scrol
 ```
 Types: KEY_DOWN/UP, MOUSE_DOWN/UP/MOVE/SCROLL, RESIZE.
 
-**Input**: left-drag=orbit camera, left-click=select (ray-OBB), scroll=zoom. Drag vs click distinguished by accumulated pixel distance (threshold 5px).
+**Input**: left-drag=orbit camera, left-click=select (ray-sphere), scroll=zoom. Drag vs click distinguished by accumulated pixel distance (threshold 5px).
 
 See `ai/wasm2wasm/reference-graphics-gd.md` for graphics.gd WASM patterns.
 
@@ -23,76 +23,85 @@ See `ai/wasm2wasm/reference-graphics-gd.md` for graphics.gd WASM patterns.
 3. Hardcoded uniform buffer sizes
 4. bulk_copy one-way (no engine→game readback)
 5. No error messages from engine
+6. Pegs are spheres — should be cylinders for realistic look
 
 ## Triggle Game Rules
 
-Board game (2-4 players). Triangular grid of pegs. Each turn: stretch rubber band across 4 consecutive pegs in a straight line. Complete a triangle → claim it with your token. Most triangles wins.
+Board game (2-4 players). **Hexagonal board** with pegs on a triangular lattice. Each turn: stretch rubber band in a straight line across exactly 4 pegs, must touch at least one existing rubber band (except first move). Complete a triangle → claim it with your token. Most triangles wins.
 
-**3 line directions**: horizontal + two 60° diagonals.
+**3 line directions** on triangular lattice: along q-axis, along r-axis, along s-axis (s = -q-r). All at 60° to each other.
+
 **Key strategy**: one move can complete multiple triangles.
+
+**Components**: game board, 4 token trays, 84 tokens (21 per player in 4 colors), 50 rubber bands.
 
 ## Implementation Progress
 
 - [x] Host struct pattern
 - [x] Mouse input (down/up/move/scroll)
 - [x] Camera orbit + zoom
-- [x] Click selection (ray-OBB on cube)
 - [x] Resize event (aspect ratio fix)
-- [ ] Triangular peg grid + board rendering
-- [ ] Peg click selection
+- [x] Hexagonal peg grid + board rendering (91 pegs, hex side=5)
+- [x] Peg click selection (ray-sphere)
+- [ ] Cylinder peg mesh (replace sphere)
 - [ ] Rubber band placement + rendering
 - [ ] Triangle detection
 - [ ] Turn system + claiming
 - [ ] Win condition + UI
 
-## Next: Board + Pegs
+## Board + Pegs (done)
 
-### Triangular Grid
+### Hexagonal Grid
 
-Standard triggle board is a triangular grid. Pegs at vertices, lines along edges.
+Board is a regular hexagon of pegs on a triangular lattice. Axial coordinates (q, r) with hex constraint: max(|q|, |r|, |q+r|) <= N.
 
-Grid coordinates: use axial (q, r) for triangular grid. Each peg at position:
+World positions:
 ```
-x = q * spacing + r * spacing * cos(60°)
-y = 0 (on board plane)
+x = q * spacing + r * spacing * 0.5
+y = pegHeight (above board plane)
 z = r * spacing * sin(60°)
 ```
 
-For a board with N rows: row r has (r+1) pegs. Total pegs = N*(N+1)/2.
-Example: N=9 → 45 pegs.
+For hex side N: total pegs = 3N² + 3N + 1. N=5 → 91 pegs. Spacing = 0.7 units.
 
 ### 3 Line Directions
 
-On triangular grid, valid lines of 4 pegs:
-1. **Horizontal** — same row, consecutive q
-2. **Diagonal right** — q constant, consecutive r
-3. **Diagonal left** — (q+1,r-1) direction
+On triangular lattice, valid lines of 4 pegs:
+1. **Along q-axis** — (q,r) → (q+1,r), fixed r
+2. **Along r-axis** — (q,r) → (q,r+1), fixed q
+3. **Along s-axis** — (q,r) → (q+1,r-1), fixed s=-q-r
 
 Each line connects 4 pegs → creates 3 edges. Triangles formed by 3 edges enclosing a unit triangle.
 
 ### Peg Rendering
 
-Each peg = small cylinder or sphere. Options:
-- Generate cylinder mesh in Go (like cube vertices but circular cross-section)
-- Or use low-poly sphere (icosphere)
-- All pegs share one mesh, drawn N times with different model matrices
+Each peg = UV sphere (12 segments, 8 rings). All pegs share one mesh, drawn 91 times with per-peg translation model matrix. Wood-like color (0.75, 0.55, 0.3). Should become cylinder mesh.
 
 ### Board Rendering
 
-Flat plane under pegs (already have plane mesh). Scale/position to fit grid.
+Regular hexagon flat plane (7 vertices: center + 6 corners). Corners derived from lattice corner positions (not angle math) to ensure alignment. Wood color (0.6, 0.55, 0.45). Padded 0.4 units beyond outermost pegs.
+
+Not included in shadow pass — ground plane doesn't cast shadows, and single-sided mesh gets fully culled by CullFront.
 
 ### Selection
 
-Ray-sphere test per peg (simpler than OBB). Find closest hit peg to camera.
+Ray-sphere test per peg with inflated hit radius (2.5x actual). Find closest hit to camera.
 
 ### Data Structures (Go)
 
 ```go
 type Peg struct {
-    Q, R int      // grid coords
-    Pos  mgl.Vec3 // world position
+    Q, R int        // axial grid coords
+    Pos  [3]float32 // world position
 }
 
+type Board struct {
+    Pegs []Peg
+}
+```
+
+Future additions when game logic is implemented:
+```go
 type Edge struct {
     A, B int // peg indices
 }
@@ -105,11 +114,21 @@ type Triangle struct {
     Edges   [3]Edge
     Claimed int // player ID or -1
 }
-
-type Board struct {
-    Pegs      []Peg
-    Lines     []Line      // all valid 4-peg lines
-    Triangles []Triangle  // all possible unit triangles
-    Edges     map[Edge]bool // placed edges
-}
 ```
+
+## Learnings
+
+### Hex Grid
+- Axial coords (q,r), hex constraint max(|q|,|r|,|q+r|) <= N
+- Board plane corners must come from actual lattice corner coords, not generic angle math — otherwise misalignment
+- Lattice corners: (N,0), (0,N), (-N,N), (-N,0), (0,-N), (N,-N) in axial → convert to world
+
+### Winding / Rendering
+- Hex corners from lattice go CW from above (due to Z convention) → fan indices (0,i+1,i) for CCW front face
+- Ground plane should skip shadow pass — CullFront in shadow pipeline culls single-sided plane entirely
+- Verify winding empirically: if visible from wrong side, reverse indices
+
+### Mesh Generation
+- UV sphere: (rings+1)*(segments+1) vertices, rings*segments*6 indices
+- All pegs share one mesh handle, drawn N times with different model matrices (translation only)
+- Vertex format: pos(3) + normal(3) + color(4) = 40 bytes, must match pipeline stride
