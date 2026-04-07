@@ -297,8 +297,7 @@ func (g *Game) update(dt float32) int32 {
 	return 0
 }
 
-// Score peg positions: each player gets a row outside the board.
-// Positions arranged so up to 4 players fit around the board edges.
+// Score peg positions: each player gets a corner outside the board.
 var scoreOrigins = [][3]float32{
 	{-4.5, PegHeight, 4.5},  // player 0 (red): bottom-left
 	{4.5, PegHeight, -4.5},  // player 1 (blue): top-right
@@ -306,39 +305,40 @@ var scoreOrigins = [][3]float32{
 	{-4.5, PegHeight, -4.5}, // player 3 (yellow): top-left
 }
 
-// Score pegs grow along x for players 0,2 and along -x for players 1,3
-var scoreDirs = [][2]float32{
+// Column direction (along x) and row direction (along z) per player
+var scoreColDir = [][2]float32{
 	{0.25, 0},  // player 0: +x
 	{-0.25, 0}, // player 1: -x
 	{-0.25, 0}, // player 2: -x
 	{0.25, 0},  // player 3: +x
 }
+var scoreRowDir = [][2]float32{
+	{0, -0.25}, // player 0: -z (toward board)
+	{0, 0.25},  // player 1: +z (toward board)
+	{0, -0.25}, // player 2: -z
+	{0, 0.25},  // player 3: +z
+}
+
+const scoreMaxCols = 5
 
 func (g *Game) drawScorePegs() {
 	g.engine.BindMesh(g.scorePegMesh)
 	for p := range g.board.NumPlayers {
 		score := g.board.Scores[p]
-		if score == 0 && p != g.board.CurrentPlayer {
+		if score == 0 {
 			continue
 		}
 		color := PlayerColors[p%len(PlayerColors)]
-		isActive := p == g.board.CurrentPlayer
 		origin := scoreOrigins[p]
-		dir := scoreDirs[p]
+		col := scoreColDir[p]
+		row := scoreRowDir[p]
 
-		// Draw an "active indicator" peg at origin (slightly larger via scale)
-		if isActive {
-			amb := mgl.Vec3{color[0] * 0.8, color[1] * 0.8, color[2] * 0.8}
-			model := mgl.Translate3D(origin[0], origin[1]+0.05, origin[2]).Mul4(
-				mgl.Scale3D(1.5, 1.5, 1.5))
-			g.drawObjectBound(model, amb, g.pegIndexCount)
-		}
-
-		// Draw score pegs in a row
 		amb := mgl.Vec3{color[0] * 0.6, color[1] * 0.6, color[2] * 0.6}
 		for i := range score {
-			x := origin[0] + float32(i+1)*dir[0]
-			z := origin[2] + float32(i+1)*dir[1]
+			c := i % scoreMaxCols
+			r := i / scoreMaxCols
+			x := origin[0] + float32(c)*col[0] + float32(r)*row[0]
+			z := origin[2] + float32(c)*col[1] + float32(r)*row[1]
 			model := mgl.Translate3D(x, origin[1], z)
 			g.drawObjectBound(model, amb, g.pegIndexCount)
 		}

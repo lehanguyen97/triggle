@@ -319,13 +319,18 @@ func (b *Board) FindLine(a, bIdx int) *Line {
 	return nil
 }
 
-// CanPlace checks if a line can be placed (no duplicate edges, adjacency rule).
+// CanPlace checks if a line can be placed (at least one new edge, adjacency rule).
 func (b *Board) CanPlace(line *Line) bool {
+	hasNew := false
 	for i := range 3 {
 		e := MakeEdge(line.Pegs[i], line.Pegs[i+1])
-		if _, exists := b.Edges[e]; exists {
-			return false
+		if _, exists := b.Edges[e]; !exists {
+			hasNew = true
+			break
 		}
+	}
+	if !hasNew {
+		return false
 	}
 	if len(b.PlacedBands) > 0 {
 		touches := false
@@ -348,7 +353,9 @@ func (b *Board) PlaceBand(line Line) int {
 	b.PlacedBands = append(b.PlacedBands, line)
 	for i := range 3 {
 		e := MakeEdge(line.Pegs[i], line.Pegs[i+1])
-		b.Edges[e] = b.CurrentPlayer
+		if _, exists := b.Edges[e]; !exists {
+			b.Edges[e] = b.CurrentPlayer
+		}
 	}
 	for _, p := range line.Pegs {
 		b.UsedPegs[p] = true

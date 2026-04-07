@@ -27,7 +27,7 @@ See `ai/wasm2wasm/reference-graphics-gd.md` for graphics.gd WASM patterns.
 
 ## Triggle Game Rules
 
-Board game (2-4 players). **Hexagonal board** with pegs on a triangular lattice. Each turn: stretch rubber band in a straight line across exactly 4 pegs, must touch at least one existing rubber band (except first move). Complete a triangle → claim it with your token. Most triangles wins.
+Board game (2-4 players). **Hexagonal board** with pegs on a triangular lattice. Each turn: stretch rubber band in a straight line across exactly 4 pegs, must touch at least one existing rubber band (except first move). A placement must add **at least one new edge** (edges may overlap prior bands along shared triangle sides). Complete a triangle → claim it with your token. Most triangles wins.
 
 **3 line directions** on triangular lattice: along q-axis, along r-axis, along s-axis (s = -q-r). All at 60° to each other.
 
@@ -43,10 +43,9 @@ Board game (2-4 players). **Hexagonal board** with pegs on a triangular lattice.
 - [x] Resize event (aspect ratio fix)
 - [x] Hexagonal peg grid + board rendering (91 pegs, hex side=5)
 - [x] Peg click selection (ray-sphere)
+- [x] Band placement rules (adjacency, ≥1 new edge), triangle claiming, scores, turn advance
 - [ ] Cylinder peg mesh (replace sphere)
-- [ ] Rubber band placement + rendering
-- [ ] Triangle detection
-- [ ] Turn system + claiming
+- [ ] Rubber band rendering (geometry on board)
 - [ ] Win condition + UI
 
 ## Board + Pegs (done)

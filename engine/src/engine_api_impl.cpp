@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <deque>
 #include "engine.hpp"
 
 #ifdef __EMSCRIPTEN__
@@ -136,7 +137,7 @@ static sg_cull_mode map_cull(int32_t c) {
 
 /* --- Temporary string storage --- */
 struct TempStrings {
-    std::vector<std::string> strings;
+    std::deque<std::string> strings;
     const char* add(const char* data, int32_t len) {
         strings.emplace_back(data, len);
         return strings.back().c_str();

@@ -1,5 +1,29 @@
 # Changelog
 
+## 2026-04-07: WASM HTML loader, engine temp strings, board edges
+
+### WASM (`engine/triggle.html` + CMake)
+
+- **`triggle.html` copied to build output** next to `triggle.js` (Emscripten `POST_BUILD`) so `http.server` from the build dir serves the right page.
+- **Linker exports**: `EXPORTED_FUNCTIONS` lists only `_main,_malloc,_free`. All `engine_*` C API symbols stay exported via **`EMSCRIPTEN_KEEPALIVE`** in `engine_api_impl.cpp` (no need to duplicate names in CMake).
+- **Game module imports**: `bulk_copy` plus **auto-forward** — iterate `Module` for keys `_engine_*` and attach as `engine_*` on the import object (avoids hand-maintaining a long list when the API changes).
+- **WASI**: factored into a small `wasiPolyfill()` (fd_write, clock, random, stubs) for Go wasip1 reactor.
+
+### Engine (`engine_api_impl.cpp`)
+
+- **`TempStrings` uses `std::deque` instead of `std::vector`**: multiple `add()` calls feed `sg_shader_desc` with pointers from `c_str()`; vector reallocation could invalidate earlier pointers; deque appends do not invalidate existing element addresses.
+
+### Removed files
+
+- **`engine/src/shader.glsl`**, **`engine/src/shader.h`** — unused after Go-owned Phong/shadow shaders.
+
+### Game (`game_go`)
+
+- **`Board.CanPlace`**: placement allowed if the line adds **at least one new edge** (shared edges with prior bands OK); **`PlaceBand`** only inserts `Edges` for edges not already present (existing edge ownership unchanged).
+- **Score peg UI**: pegs arranged in a **5-column grid** per player corner; corners with **score 0** draw nothing (no pegs).
+
+---
+
 ## 2026-03-07: Shader API + Shadow Mapping
 
 ### New Engine API (thin sokol wrapper)
@@ -23,7 +47,7 @@ Replaced hardcoded single-shader engine with low-level graphics API. Engine has 
 
 #### Removed
 - `engine_frame_begin`, `engine_draw`, `engine_frame_end` (old hardcoded render path)
-- `shader.glsl` / `shader.h` no longer used for rendering (still in tree)
+- `shader.glsl` / `shader.h` (legacy sokol-shdc color demo; removed from tree — all shaders from Go)
 
 ### Sokol API Notes
 

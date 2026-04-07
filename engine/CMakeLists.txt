@@ -50,7 +50,16 @@ if(EMSCRIPTEN)
     set_target_properties(
         triggle PROPERTIES
         SUFFIX ".js"
-        LINK_FLAGS "-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 --emit-symbol-map -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_engine_init,_engine_cleanup,_engine_malloc,_engine_free,_engine_mesh_create,_engine_mesh_destroy,_engine_shader_create,_engine_pipeline_create,_engine_image_create_target,_engine_sampler_create,_engine_pass_create,_engine_pass_begin,_engine_pass_begin_default,_engine_pass_end,_engine_commit,_engine_apply_pipeline,_engine_bind_mesh,_engine_bind_image,_engine_apply_uniforms,_engine_draw_elements -sEXPORTED_RUNTIME_METHODS=wasmMemory,addRunDependency,removeRunDependency"
+        LINK_FLAGS "-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 --emit-symbol-map -sEXPORTED_FUNCTIONS=_main,_malloc,_free -sEXPORTED_RUNTIME_METHODS=wasmMemory,addRunDependency,removeRunDependency"
+    )
+
+    # Copy triggle.html to output directory
+    add_custom_command(
+        TARGET triggle POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_CURRENT_SOURCE_DIR}/triggle.html
+            $<TARGET_FILE_DIR:triggle>/triggle.html
+        VERBATIM
     )
 elseif(LINUX)
     # target_link_libraries(triggle PUBLIC wayland-client xkbcommon GL EGL)

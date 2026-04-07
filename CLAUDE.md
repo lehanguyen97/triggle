@@ -18,7 +18,7 @@ Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
 - Hexagonal board plane (wood color, aligned to lattice)
 - Pegs are UV spheres (should become cylinders for realistic look)
 
-**Next**: cylinder peg mesh, then rubber band placement + rendering
+**Next**: cylinder peg mesh, rubber band rendering polish
 
 ## Docs
 
@@ -64,6 +64,10 @@ engine/
 - Board plane winding: hex corners derived from lattice coords go CW from above due to Z-negate → use (0,i+1,i) fan order for CCW front face. Verify empirically if unsure
 - Board plane should NOT be in shadow pass — ground plane doesn't need to cast shadows, and single-sided mesh gets fully culled by CullFront
 - Hex board corners must be derived from actual lattice corner positions, not generic angle math — otherwise board and pegs misalign
+- **WASM HTML**: `triggle.html` — `bulk_copy` + iterate `Module._engine_*` → game `env` imports; WASI polyfill for reactor. CMake copies `triggle.html` beside `triggle.js` on Emscripten builds
+- **Emscripten exports**: `EXPORTED_FUNCTIONS` minimal (`_main,_malloc,_free`); `engine_*` via `EMSCRIPTEN_KEEPALIVE` on each C API function
+- **C++ `TempStrings`**: use **`std::deque`** for shader descriptor string storage — `std::vector` can reallocate and invalidate earlier `c_str()` pointers from multiple `add()` calls
+- **Band placement**: `CanPlace` requires ≥1 new edge; `PlaceBand` only adds `Edges` entries for edges that do not already exist
 
 ## Build
 
