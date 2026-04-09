@@ -31,8 +31,8 @@ CMakePresets.json
 *.dSYM/
 
 # Go build artifacts
-/game_go/libgame.a
-/game_go/libgame.h
+/game/libgame.a
+/game/libgame.h
 *.test
 *.prof
 

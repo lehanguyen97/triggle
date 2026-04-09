@@ -1,12 +1,12 @@
-[submodule "engine/vendor/sokol"]
-	path = engine/vendor/sokol
+[submodule "backend/vendor/sokol"]
+	path = backend/vendor/sokol
 	url = https://github.com/floooh/sokol
-[submodule "engine/vendor/cglm"]
-	path = engine/vendor/cglm
+[submodule "backend/vendor/cglm"]
+	path = backend/vendor/cglm
 	url = https://github.com/recp/cglm.git
-[submodule "engine/vendor/sokol-samples"]
-	path = engine/vendor/sokol-samples
+[submodule "backend/vendor/sokol-samples"]
+	path = backend/vendor/sokol-samples
 	url = https://github.com/floooh/sokol-samples
-[submodule "engine/vendor/cgltf"]
-	path = engine/vendor/cgltf
+[submodule "backend/vendor/cgltf"]
+	path = backend/vendor/cgltf
 	url = https://github.com/jkuhlmann/cgltf

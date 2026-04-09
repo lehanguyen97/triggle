@@ -4,7 +4,7 @@
 
 ### WASM (`engine/triggle.html` + CMake)
 
-- **`triggle.html` copied to build output** next to `triggle.js` (Emscripten `POST_BUILD`) so `http.server` from the build dir serves the right page.
+- **`triggle.html` copied to build output** next to `triggle.js` (Emscripten `POST_BUILD`) so `emrun` / a static server from the build dir serves the right page.
 - **Linker exports**: `EXPORTED_FUNCTIONS` lists only `_main,_malloc,_free`. All `engine_*` C API symbols stay exported via **`EMSCRIPTEN_KEEPALIVE`** in `engine_api_impl.cpp` (no need to duplicate names in CMake).
 - **Game module imports**: `bulk_copy` plus **auto-forward** — iterate `Module` for keys `_engine_*` and attach as `engine_*` on the import object (avoids hand-maintaining a long list when the API changes).
 - **WASI**: factored into a small `wasiPolyfill()` (fd_write, clock, random, stubs) for Go wasip1 reactor.

@@ -16,7 +16,7 @@ cmake -B build && cmake --build build
 emcmake cmake -B build-wasm && cmake --build build-wasm
 
 # Serve WASM build
-python3 -m http.server -d build-wasm/engine 8080
+emrun --no_browser --port 8090 build-wasm/triggle/Debug/triggle.html
 ```
 
 ## Learnings

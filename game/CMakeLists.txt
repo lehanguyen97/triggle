@@ -1,4 +1,51 @@
-add_library(game SHARED game.cpp)
-target_include_directories(game PRIVATE ${CMAKE_SOURCE_DIR}/engine/include)
+cmake_minimum_required(VERSION 3.20)
 
-target_link_libraries(game PRIVATE cglm_headers)
+set(GO_COMPILER go) # TODO tinygo
+find_program(GO_EXEC ${GO_COMPILER} REQUIRED)
+set(GO_MOD_FILES
+    ${CMAKE_CURRENT_SOURCE_DIR}/go.mod
+    ${CMAKE_CURRENT_SOURCE_DIR}/go.sum
+)
+get_filename_component(_GAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}" ABSOLUTE)
+file(GLOB_RECURSE GO_SOURCES CONFIGURE_DEPENDS "${_GAME_DIR}/**/*.go")
+# triggle/engine module sources (not under game/); must be listed or CMake skips game.wasm rebuild
+get_filename_component(_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engine" ABSOLUTE)
+file(GLOB_RECURSE ENGINE_GO_SOURCES CONFIGURE_DEPENDS "${_ENGINE_DIR}/**/*.go")
+
+if(EMSCRIPTEN)
+    set(GAME_WASM_DIR ${CMAKE_CURRENT_BINARY_DIR})
+    set(GO_GAME_WASM ${CMAKE_CURRENT_BINARY_DIR}/game.wasm)
+
+    add_custom_command(
+        OUTPUT ${GO_GAME_WASM}
+        COMMAND ${CMAKE_COMMAND} -E env GOOS=wasip1 GOARCH=wasm ${GO_EXEC} build -buildmode=c-shared -o ${GO_GAME_WASM} ${CMAKE_CURRENT_SOURCE_DIR}
+        DEPENDS ${GO_MOD_FILES} ${GO_SOURCES} ${ENGINE_GO_SOURCES}
+        VERBATIM
+    )
+
+    add_custom_target(game ALL DEPENDS ${GO_GAME_WASM})
+    set_target_properties(game PROPERTIES GAME_WASM_DIR ${GAME_WASM_DIR})
+else()
+    set(GO_GAME_ARCHIVE ${CMAKE_CURRENT_BINARY_DIR}/libgamego.a)
+    set(GO_GAME_HEADER ${CMAKE_CURRENT_BINARY_DIR}/libgamego.h)
+
+    # native command and target
+    add_custom_command(
+        OUTPUT ${GO_GAME_ARCHIVE} ${GO_GAME_HEADER}
+        COMMAND ${GO_EXEC} build -buildmode=c-archive -o ${GO_GAME_ARCHIVE} ${CMAKE_CURRENT_SOURCE_DIR}
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
+        DEPENDS ${GO_MOD_FILES} ${GO_SOURCES} ${ENGINE_GO_SOURCES}
+        VERBATIM
+    )
+
+    add_custom_target(go_game_lib ALL
+        DEPENDS ${GO_GAME_ARCHIVE} ${GO_GAME_HEADER}
+    )
+
+    add_library(game STATIC IMPORTED GLOBAL)
+    set_target_properties(game PROPERTIES
+        IMPORTED_LOCATION ${GO_GAME_ARCHIVE}
+        INTERFACE_INCLUDE_DIRECTORIES ${CMAKE_CURRENT_BINARY_DIR}
+    )
+    add_dependencies(game go_game_lib)
+endif()

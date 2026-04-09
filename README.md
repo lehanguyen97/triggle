@@ -14,8 +14,9 @@ Browser: Go (wasip1 c-shared) ──wasmimport/export──> Emscripten ──> 
          JS bulk_copy bridges two WASM linear memories
 ```
 
-- **Game logic**: Go (`game_go/`) — board state, input, camera, rendering commands
-- **Engine**: C++/Sokol (`engine/`) — thin wrapper around sokol_gfx, resource management
+- **Game logic**: Go (`game/`) — board state, input, camera, rendering commands
+- **Go runtime**: `engine/` (module `triggle/engine`) — gfx, render, `engine/nativebridge` (C API bindings)
+- **Native backend**: C++/Sokol (`nativebridge/`) — thin wrapper around sokol_gfx, resource management
 - **Host struct**: `EngineHost` function-pointer struct, platform files assign at init
 - **Board**: hexagonal grid (91 pegs, side=5) on triangular lattice, axial coords (q,r)
 
@@ -34,8 +35,8 @@ cmake -B build && cmake --build build
 # WASM (requires emsdk)
 emcmake cmake -B build-wasm && cmake --build build-wasm
 
-# Serve
-python3 -m http.server -d build-wasm/engine/Debug 8090
+# Serve (needs emsdk on PATH; serve root is the .html’s directory)
+emrun --no_browser --port 8090 build-wasm/triggle/Debug/triggle.html
 # Open http://localhost:8090/triggle.html
 ```
 

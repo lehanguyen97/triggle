@@ -16,14 +16,19 @@ Types: KEY_DOWN/UP, MOUSE_DOWN/UP/MOVE/SCROLL, RESIZE.
 
 See `ai/wasm2wasm/reference-graphics-gd.md` for graphics.gd WASM patterns.
 
+**Asset loading (Web):** first implementation uses **Emscripten preload only** (`--preload-file`); **async HTTP fetch** for assets is deferred. Parsing stays in the **C++ engine**. Rationale, loading UI, and rollout steps: `ai/asset-loading.md`.
+
+**Runtime structure direction:** keep `game + runtime` in a single Go WASM module (separate from engine WASM), with render/audio/input orchestration in Go runtime packages and C++ kept thin. API/package plan: `ai/go-runtime-api-plan.md`.
+
 ## Known Issues
 
 1. Binary descriptors fragile (no version, no schema)
 2. No handle validation (stale IDs → UB)
 3. Hardcoded uniform buffer sizes
-4. bulk_copy one-way (no engine→game readback)
+4. Bridge readback is explicit (`bulk_copy_back` + out-struct APIs), not a generic typed ABI
 5. No error messages from engine
 6. Pegs are spheres — should be cylinders for realistic look
+7. API errors still use sentinel integers/handles (`-1`/`0`) rather than typed error enums
 
 ## Triggle Game Rules
 
@@ -131,3 +136,4 @@ type Triangle struct {
 - UV sphere: (rings+1)*(segments+1) vertices, rings*segments*6 indices
 - All pegs share one mesh handle, drawn N times with different model matrices (translation only)
 - Vertex format: pos(3) + normal(3) + color(4) = 40 bytes, must match pipeline stride
+- Renderer caches mesh index metadata at registration time; draw path avoids per-draw metadata queries

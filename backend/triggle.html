@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triggle</title>
+    <style>
+        body { overflow: hidden; margin: 0; }
+        #canvas { display: block; height: 100vh; width: 100vw; }
+    </style>
+</head>
+<body>
+    <canvas id="canvas"></canvas>
+    <script type="text/javascript">
+        let gameExports = null;
+
+        // Minimal WASI polyfill for Go wasip1 reactor
+        function wasiPolyfill() {
+            const mem = () => new DataView(gameExports.memory.buffer);
+            return {
+                fd_write: (fd, iovs_ptr, iovs_len, nwritten_ptr) => {
+                    const m = mem();
+                    let written = 0;
+                    for (let i = 0; i < iovs_len; i++) {
+                        const ptr = m.getUint32(iovs_ptr + i * 8, true);
+                        const len = m.getUint32(iovs_ptr + i * 8 + 4, true);
+                        const text = new TextDecoder().decode(
+                            new Uint8Array(gameExports.memory.buffer, ptr, len));
+                        if (fd === 1) console.log(text); else console.error(text);
+                        written += len;
+                    }
+                    m.setUint32(nwritten_ptr, written, true);
+                    return 0;
+                },
+                clock_time_get: (id, precision, ptr) => {
+                    mem().setBigInt64(ptr, BigInt(Date.now()) * 1000000n, true);
+                    return 0;
+                },
+                random_get: (buf, len) => {
+                    crypto.getRandomValues(new Uint8Array(gameExports.memory.buffer, buf, len));
+                    return 0;
+                },
+                environ_sizes_get: (count, size) => { const m = mem(); m.setUint32(count, 0, true); m.setUint32(size, 0, true); return 0; },
+                args_sizes_get: (argc, argv) => { const m = mem(); m.setUint32(argc, 0, true); m.setUint32(argv, 0, true); return 0; },
+                fd_fdstat_get: (fd, buf) => {
+                    const m = mem();
+                    m.setUint8(buf, 4);
+                    m.setUint16(buf + 2, 0, true);
+                    m.setBigUint64(buf + 8, 0n, true);
+                    m.setBigUint64(buf + 16, 0n, true);
+                    return 0;
+                },
+                proc_exit: (code) => { throw new Error('proc_exit: ' + code); },
+                // Stubs — imported by Go but not called in reactor mode
+                fd_read: () => 8, fd_close: () => 0, fd_fdstat_set_flags: () => 0,
+                fd_seek: () => 8, fd_prestat_get: () => 8, fd_prestat_dir_name: () => 8,
+                path_open: () => 44, environ_get: () => 0, args_get: () => 0,
+                sched_yield: () => 0, poll_oneoff: () => 0,
+            };
+        }
+
+        var Module = {
+            canvas: document.getElementById('canvas'),
+            preRun: [function() {
+                Module.addRunDependency('game-wasm');
+
+                fetch('game/game.wasm')
+                    .then(r => r.arrayBuffer())
+                    .then(bytes => WebAssembly.compile(bytes))
+                    .then(mod => {
+                        const backendMemory = Module.wasmMemory;
+
+                        // Auto-forward all backend_* exports to game imports
+                        const env = {
+                            bulk_copy: (dst, src, len) => {
+                                new Uint8Array(backendMemory.buffer, dst, len)
+                                    .set(new Uint8Array(gameExports.memory.buffer, src, len));
+                            },
+                            bulk_copy_back: (dst, src, len) => {
+                                new Uint8Array(gameExports.memory.buffer, dst, len)
+                                    .set(new Uint8Array(backendMemory.buffer, src, len));
+                            },
+                        };
+                        for (const key in Module) {
+                            if (key.startsWith('_backend_'))
+                                env[key.substring(1)] = Module[key];
+                        }
+
+                        const instance = new WebAssembly.Instance(mod, {
+                            env,
+                            wasi_snapshot_preview1: wasiPolyfill(),
+                        });
+                        gameExports = instance.exports;
+                        if (gameExports._initialize) gameExports._initialize();
+                        Module._gameExports = gameExports;
+                        Module.removeRunDependency('game-wasm');
+                    })
+                    .catch(err => console.error('Failed to load game.wasm:', err));
+            }],
+        };
+    </script>
+    <script async src="triggle.js"></script>
+</body>
+</html>

@@ -9,7 +9,9 @@ Keep this file and `ai/` docs updated every chance. Goal: resume from CLAUDE.md 
 ## Current State
 
 Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
-- Host struct pattern — `host.go` + `host_{cgo,wasm}.go`
+- Go runtime module — `engine/` (`gfx/`, `shader/`, `render/`, `engine/backend` Go package for C API); `game/` is thin `main` + rules
+- C++ backend — `backend/` (Sokol, `include/e/`, `src/`)
+- Host struct pattern — `engine/backend/host.go` + `host_{cgo,wasm}.go` (`BackendHost`, `Backend`, `NewBackend`)
 - Unified event API — flattened scalars for both CGO and WASM
 - Mouse input — left-drag orbit, left-click select (ray-sphere), scroll zoom
 - Resize event — engine sends `G_EVENT_RESIZE` on init + window resize
@@ -23,6 +25,10 @@ Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
 ## Docs
 
 - `ai/design.md` — architecture, game rules, feature plan, known issues
+- `ai/asset-loading.md` — WASM preload-only asset story; async fetch later; **`assets/` at repo root** (not under `backend/` or `engine/`)
+- `ai/gltf-rendering-api.md` — glTF **materials / textures** API direction (vs current Phong mesh-only load)
+- `ai/go-runtime-api-plan.md` — one Go WASM (`game + runtime`) API/package plan; C++ stays thin backend
+- `ai/go-host-logging-plan.md` — Go→host logging/errors (graphics.gd–style string + length through C/WASM; avoid `log`/`fmt` on hot path)
 - `ai/rubber-band-plan.md` — rubber band placement implementation plan
 - `ai/wasm2wasm/reference-graphics-gd.md` — graphics.gd patterns (Host struct, bulk_copy)
 - `README.md` — overview + build
@@ -30,27 +36,26 @@ Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
 ## Key Architecture
 
 ```
-game_go/
-  host.go        — EngineHost struct (func fields) + Engine wrapper methods
-  host_cgo.go    — CGO init(), C function bindings
-  host_wasm.go   — go:wasmimport decls + init()
-  game.go        — game logic, camera, input, render loop
+engine/ (Go module triggle/engine only — no C++ here)
+  backend/       — BackendHost + Backend + GPU interface; host_{cgo,wasm}.go, ptr_*.go
+  gfx/           — descriptor builders, UploadMesh, constants
+  shader/        — Phong + shadow GLSL
+  render/        — Renderer, PhongRenderer, PipelineFamilyCache
+game/
+  game.go        — game logic, camera, input; submits render.SceneDrawable
   board.go       — Board struct, hex grid gen, sphere mesh, ray-sphere picking
-  gfx.go         — constants, binary descriptor builders, UploadMesh/CreateShader
-  shader_phong.go— GLSL sources + shader/pipeline descriptors
   game_api_impl_{cgo,wasm}.go — game callbacks (//export vs //go:wasmexport)
-  ptr_{native,wasm}.go — Ptr = uintptr vs uint32
-
-engine/
-  include/e/engine_api.h  — C engine API
+backend/ (C++ / Emscripten)
+  include/e/backend_api.h — C GPU API
   include/e/game_api.h    — game callback API (flattened event signature)
-  src/engine_api_impl.cpp — Sokol implementation
-  triggle.html             — WASM loader (bulk_copy bridge, WASI polyfills)
+  src/backend_api_impl.cpp — Sokol implementation
+  triggle.html              — WASM loader (bulk_copy bridge, WASI polyfills)
+  vendor/                   — sokol, cglm, cgltf (git submodules)
 ```
 
 ## Learnings
 
-- Two WASM modules = separate linear memories → JS `bulk_copy` bridge
+- Two WASM modules = separate linear memories → JS `bulk_copy` / `bulk_copy_back` bridge
 - `Ptr = uintptr` (native) vs `uint32` (WASM). `go:wasmimport/export` = scalars only
 - Go wasip1 `-buildmode=c-shared` = reactor, no wasm_exec.js
 - Binary descriptors: Go encodes blobs, C++ BlobReader decodes. Fragile, no version field
@@ -64,33 +69,37 @@ engine/
 - Board plane winding: hex corners derived from lattice coords go CW from above due to Z-negate → use (0,i+1,i) fan order for CCW front face. Verify empirically if unsure
 - Board plane should NOT be in shadow pass — ground plane doesn't need to cast shadows, and single-sided mesh gets fully culled by CullFront
 - Hex board corners must be derived from actual lattice corner positions, not generic angle math — otherwise board and pegs misalign
-- **WASM HTML**: `triggle.html` — `bulk_copy` + iterate `Module._engine_*` → game `env` imports; WASI polyfill for reactor. CMake copies `triggle.html` beside `triggle.js` on Emscripten builds
-- **Emscripten exports**: `EXPORTED_FUNCTIONS` minimal (`_main,_malloc,_free`); `engine_*` via `EMSCRIPTEN_KEEPALIVE` on each C API function
+- **WASM HTML**: `backend/triggle.html` — `bulk_copy` + iterate `Module._backend_*` → game `env` imports; WASI polyfill for reactor. CMake copies `triggle.html` beside `triggle.js` on Emscripten builds
+- **Mesh metadata**: renderer caches `index_count/index_type` per mesh at registration time and uses it on draw path (no per-draw `MeshIndexCount` / `MeshIndexType` boundary calls)
+- **Out-struct bridge**: `backend_mesh_get_info(mesh, out*)` writes packed metadata in backend memory; Go copies it back and casts to `backend.MeshInfo`
+- **Error signaling today**: backend API still uses integer/sentinel returns (`-1`/`0`) for failures; TODO is typed error enums/codes for mesh/glTF/resource APIs
+- **Emscripten exports**: `EXPORTED_FUNCTIONS` lists `_backend_*` (and a few glTF helpers) plus `_main,_malloc,_free`; remaining C API via `EMSCRIPTEN_KEEPALIVE` on each function
 - **C++ `TempStrings`**: use **`std::deque`** for shader descriptor string storage — `std::vector` can reallocate and invalidate earlier `c_str()` pointers from multiple `add()` calls
 - **Band placement**: `CanPlace` requires ≥1 new edge; `PlaceBand` only adds `Edges` entries for edges that do not already exist
 
 ## Build
 
 ```bash
-# Native (CGO) — requires engine C library built first
+# Native (CGO) — requires `backend` C++ target built first (links game + triggle)
 cmake -B build && cmake --build build
 
 # WASM — requires emsdk
 emcmake cmake -B build-wasm && cmake --build build-wasm
 
-# Serve WASM build (use port 8090)
-python3 -m http.server -d build-wasm/engine/Debug 8090
+# Serve WASM build (emsdk on PATH)
+emrun --no_browser --port 8090 build-wasm/triggle/Debug/triggle.html
 # Open http://localhost:8090/triggle.html
 ```
 
-Don't commit `build-wasm/`, `engine/vendor/`
+Don't commit `build-wasm/`, `backend/vendor/`
 
 ## Known Issues
 
 - Binary descriptors: no version, encoder/decoder must stay in sync
 - No handle validation (use-after-free possible)
 - Hardcoded uniform buffer sizes (must match Go struct layout)
-- bulk_copy one-way only (no engine→game readback)
+- Readback now exists via `bulk_copy_back`; still no generic typed ABI beyond explicit out-struct APIs
+- Error diagnostics are still coarse (`-1`/`0`); structured `BACKEND_ERR_*` codes are a future improvement
 - No error messages from engine (just -1)
 - Pegs are spheres, should be cylinders for realistic Triggle look
 
