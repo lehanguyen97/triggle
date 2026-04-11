@@ -14,11 +14,35 @@ Types: KEY_DOWN/UP, MOUSE_DOWN/UP/MOVE/SCROLL, RESIZE.
 
 **Input**: left-drag=orbit camera, left-click=select (ray-sphere), scroll=zoom. Drag vs click distinguished by accumulated pixel distance (threshold 5px).
 
-See `ai/wasm2wasm/reference-graphics-gd.md` for graphics.gd WASM patterns.
+See `ai/reference-graphics-gd.md` for graphics.gd WASM patterns.
 
 **Asset loading (Web):** first implementation uses **Emscripten preload only** (`--preload-file`); **async HTTP fetch** for assets is deferred. Parsing stays in the **C++ engine**. Rationale, loading UI, and rollout steps: `ai/asset-loading.md`.
 
 **Runtime structure direction:** keep `game + runtime` in a single Go WASM module (separate from engine WASM), with render/audio/input orchestration in Go runtime packages and C++ kept thin. API/package plan: `ai/go-runtime-api-plan.md`.
+
+## Rendering bridge (final state)
+
+- `ForwardRenderer` is the runtime renderer and supports per-draw program selection (`RenderProgramID`).
+- Submission is command-buffer-only:
+  - Go encodes shadow + main + commit commands for one frame.
+  - One `BulkCopy` uploads the frame command stream.
+  - One `SubmitCommandBuffer` call crosses Go<->backend boundary per frame.
+- Backend render API keeps thin execution role:
+  - C++ decodes command stream and maps to Sokol calls.
+  - Per-draw immediate bridge functions were removed from runtime API.
+- Mesh metadata stays cached in renderer (`index_count`, `index_type`) to avoid draw-time metadata boundary calls.
+
+### Command stream invariants
+
+- Command stream header/version must stay in sync between Go encoder and C++ decoder.
+- `ApplyPipeline` command semantics reset current bindings in backend executor.
+- Native and WASM render behavior must remain equivalent for the same frame command stream.
+
+### Rendering follow-ups
+
+- Add command stream versioning tests to catch encoder/decoder drift.
+- Add optional command compaction (state dedup and uniform payload dedup).
+- Add lightweight telemetry: command bytes per frame and decode cost per frame.
 
 ## Known Issues
 

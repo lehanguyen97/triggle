@@ -46,7 +46,7 @@ var PlayerColors = [][4]float32{
 }
 
 type Game struct {
-	rnd *render.PhongRenderer
+	rnd *render.ForwardRenderer
 
 	// Meshes
 	pegMesh      int32
@@ -107,7 +107,7 @@ func newGame() (*Game, error) {
 	if eng.Handle() != 0 {
 		return nil, errors.New("triggle: backend init failed")
 	}
-	g.rnd = render.NewPhongRenderer(eng)
+	g.rnd = render.NewForwardRenderer(eng)
 	abort := func(err error) (*Game, error) {
 		g.rnd.Release()
 		_ = g.rnd.GPU().Cleanup()
@@ -252,7 +252,7 @@ func (g *Game) update(dt float32) int32 {
 		Mesh: g.boardMesh, Model: boardModel, MaterialID: 0, Ambient: g.ambient,
 	})
 	g.rnd.SubmitMain(render.SceneDrawable{
-		Mesh: g.gltfMesh, Model: gltfModel, MaterialID: 0, Ambient: mgl.Vec3{0.5, 0.7, 0.9},
+		Mesh: g.gltfMesh, Model: gltfModel, Program: render.RenderProgramToon, MaterialID: 0, Ambient: mgl.Vec3{0.5, 0.7, 0.9},
 	})
 	g.rnd.SubmitMain(render.SceneDrawable{
 		Mesh: g.borderMesh, Model: boardModel, MaterialID: 0, Ambient: g.ambient,

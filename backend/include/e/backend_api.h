@@ -97,8 +97,6 @@ mesh_t   backend_mesh_create(backend_t e,
              void* vertices, int32_t vert_bytes,
              void* indices, int32_t idx_bytes);
 void     backend_mesh_destroy(mesh_t m);
-int32_t  backend_mesh_index_count(mesh_t m);
-int32_t  backend_mesh_index_type(mesh_t m);
 void     backend_mesh_get_info(mesh_t m, backend_mesh_info_t* out_info);
 
 /* glTF — primitive handles match Engine::gltf_load order (all mesh primitives) */
@@ -124,17 +122,8 @@ sampler_t backend_sampler_create(backend_t e,
 /* Pass (attachments) — color or depth can be -1 for unused */
 pass_t backend_pass_create(backend_t e, image_t color, image_t depth);
 
-/* Rendering */
-void backend_pass_begin(backend_t e, pass_t p, float clear_depth);
-void backend_pass_begin_default(backend_t e,
-         float r, float g, float b, float a, float depth);
-void backend_pass_end(backend_t e);
-void backend_commit(backend_t e);
-void backend_apply_pipeline(backend_t e, pipeline_t p);
-void backend_bind_mesh(backend_t e, mesh_t m);
-void backend_bind_image(backend_t e, int32_t slot, image_t img, sampler_t smp);
-void backend_apply_uniforms(backend_t e, int32_t slot, void* data, int32_t len);
-void backend_draw_elements(backend_t e, int32_t base, int32_t count, int32_t instances);
+/* Rendering (batched command buffer path) */
+void backend_submit_command_buffer(backend_t e, void* data, int32_t len);
 
 #ifdef __cplusplus
 }

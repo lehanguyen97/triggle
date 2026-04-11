@@ -29,8 +29,9 @@ Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
 - `ai/gltf-rendering-api.md` — glTF **materials / textures** API direction (vs current Phong mesh-only load)
 - `ai/go-runtime-api-plan.md` — one Go WASM (`game + runtime`) API/package plan; C++ stays thin backend
 - `ai/go-host-logging-plan.md` — Go→host logging/errors (graphics.gd–style string + length through C/WASM; avoid `log`/`fmt` on hot path)
+- `ai/design.md` — canonical architecture state, including final render bridge (`ForwardRenderer` + command-buffer-only submission)
 - `ai/rubber-band-plan.md` — rubber band placement implementation plan
-- `ai/wasm2wasm/reference-graphics-gd.md` — graphics.gd patterns (Host struct, bulk_copy)
+- `ai/reference-graphics-gd.md` — graphics.gd patterns (Host struct, bulk_copy)
 - `README.md` — overview + build
 
 ## Key Architecture
@@ -40,8 +41,8 @@ engine/ (Go module triggle/engine only — no C++ here)
   backend/       — BackendHost + Backend + GPU interface; host_{cgo,wasm}.go, ptr_*.go
   hostlog/       — `hostlog.LogError` / `LogWarning` → `backend_log_*` (CGO + wasmimport)
   gfx/           — descriptor builders, UploadMesh, constants
-  shader/        — Phong + shadow GLSL
-  render/        — Renderer, PhongRenderer, PipelineFamilyCache
+  shader/        — shared GLSL (currently shadow pass)
+  render/        — Renderer, ForwardRenderer, PipelineFamilyCache
 game/
   game.go        — game logic, camera, input; submits render.SceneDrawable
   board.go       — Board struct, hex grid gen, sphere mesh, ray-sphere picking
@@ -75,10 +76,13 @@ backend/ (C++ / Emscripten)
 - **Mesh metadata**: renderer caches `index_count/index_type` per mesh at registration time and uses it on draw path (no per-draw `MeshIndexCount` / `MeshIndexType` boundary calls)
 - **Out-struct bridge**: `backend_mesh_get_info(mesh, out*)` writes packed metadata in backend memory; Go copies it back and casts to `backend.MeshInfo`
 - **Error signaling today**: backend API still uses integer/sentinel returns (`-1`/`0`) for failures; TODO is typed error enums/codes for mesh/glTF/resource APIs
-- **Emscripten exports**: `EXPORTED_FUNCTIONS` lists `_backend_*` (and a few glTF helpers) plus `_main,_malloc,_free`; remaining C API via `EMSCRIPTEN_KEEPALIVE` on each function
+- **Emscripten exports**: current build works with minimal `EXPORTED_FUNCTIONS` (`_main,_malloc,_free`) while `EMSCRIPTEN_KEEPALIVE` preserves backend symbols used by Go WASM imports
 - **C++ `TempStrings`**: use **`std::deque`** for shader descriptor string storage — `std::vector` can reallocate and invalidate earlier `c_str()` pointers from multiple `add()` calls
 - **Band placement**: `CanPlace` requires ≥1 new edge; `PlaceBand` only adds `Edges` entries for edges that do not already exist
 - **Host logging**: `triggle/engine/hostlog` calls `backend_log_error` / `backend_log_warning` from `game_api.h` (one `(ptr, len)` UTF-8 string); native `log.cpp` → stderr; WASM `triggle.html` `env` → `console.error`/`warn`. Avoid `log`/`fmt` on hot paths for WASM size
+- **RenderProgram abstraction**: main pass program is now selected per drawable (`RenderProgramPhong` default, `RenderProgramToon` sample), while pass orchestration stays shared in one renderer
+- **Command-buffer render path**: `ForwardRenderer.EndFrame` now encodes a full frame command stream, does one `BulkCopy` to backend memory, then one `SubmitCommandBuffer` boundary call; per-draw immediate calls were removed
+- **Program-owned state**: `PhongProgram` / `ToonProgram` own shader source + descriptor and emit command payloads; per-program backend uniform pointers were removed
 
 ## Build
 

@@ -40,6 +40,64 @@ struct BlobReader {
     }
 };
 
+struct CmdReader {
+    const uint8_t* data;
+    int32_t len;
+    int32_t pos;
+
+    bool can_read(int32_t n) const { return n >= 0 && pos >= 0 && pos + n <= len; }
+    bool read_u8(uint8_t* out) {
+        if (!can_read(1)) return false;
+        *out = data[pos++];
+        return true;
+    }
+    bool read_u16(uint16_t* out) {
+        if (!can_read(2)) return false;
+        memcpy(out, data + pos, 2);
+        pos += 2;
+        return true;
+    }
+    bool read_i32(int32_t* out) {
+        if (!can_read(4)) return false;
+        memcpy(out, data + pos, 4);
+        pos += 4;
+        return true;
+    }
+    bool read_u32(uint32_t* out) {
+        if (!can_read(4)) return false;
+        memcpy(out, data + pos, 4);
+        pos += 4;
+        return true;
+    }
+    bool read_f32(float* out) {
+        if (!can_read(4)) return false;
+        memcpy(out, data + pos, 4);
+        pos += 4;
+        return true;
+    }
+    const uint8_t* ptr() const { return data + pos; }
+    bool skip(int32_t n) {
+        if (!can_read(n)) return false;
+        pos += n;
+        return true;
+    }
+};
+
+enum BackendCmdOpcode : uint8_t {
+    BACKEND_CMD_PASS_BEGIN = 1,
+    BACKEND_CMD_PASS_BEGIN_DEFAULT = 2,
+    BACKEND_CMD_PASS_END = 3,
+    BACKEND_CMD_APPLY_PIPELINE = 4,
+    BACKEND_CMD_BIND_MESH = 5,
+    BACKEND_CMD_BIND_IMAGE = 6,
+    BACKEND_CMD_APPLY_UNIFORMS = 7,
+    BACKEND_CMD_DRAW_ELEMENTS = 8,
+    BACKEND_CMD_COMMIT = 9,
+};
+
+static constexpr uint32_t BACKEND_CMD_MAGIC = 0x31424354u; /* TCB1 */
+static constexpr uint16_t BACKEND_CMD_VERSION = 1;
+
 /* --- Sokol enum mappings --- */
 static sg_vertex_format map_attr_format(int32_t f) {
     switch (f) {
@@ -178,16 +236,6 @@ EXPORT mesh_t backend_mesh_create(backend_t et, void* vertices, int32_t vert_byt
 EXPORT void backend_mesh_destroy(mesh_t m) {
     if (!e) return;
     e->mesh_destroy(m);
-}
-
-EXPORT int32_t backend_mesh_index_count(mesh_t m) {
-    if (!e) return 0;
-    return e->mesh_index_count(m);
-}
-
-EXPORT int32_t backend_mesh_index_type(mesh_t m) {
-    if (!e) return 0;
-    return e->mesh_index_type(m);
 }
 
 EXPORT void backend_mesh_get_info(mesh_t m, backend_mesh_info_t* out_info) {
@@ -440,76 +488,113 @@ EXPORT pass_t backend_pass_create(backend_t et, image_t color, image_t depth) {
 }
 
 /* --- Rendering --- */
-EXPORT void backend_pass_begin(backend_t et, pass_t p, float clear_depth) {
-    if (!e || et != 0) return;
 
-    sg_pass pass = {};
-    /* p is the depth image_t. Attachment view is at views[p*2] */
-    if (p >= 0 && p * 2 < (int32_t)e->views.size()) {
-        pass.attachments.depth_stencil = e->views[p * 2];
+EXPORT void backend_submit_command_buffer(backend_t et, void* data, int32_t len) {
+    if (!e || et != 0 || !data || len < 12) return;
+    CmdReader r = {(const uint8_t*)data, len, 0};
+
+    uint32_t magic = 0;
+    uint16_t version = 0;
+    uint16_t flags = 0;
+    int32_t cmd_count = 0;
+    if (!r.read_u32(&magic) || !r.read_u16(&version) || !r.read_u16(&flags) || !r.read_i32(&cmd_count)) return;
+    (void)flags;
+    if (magic != BACKEND_CMD_MAGIC || version != BACKEND_CMD_VERSION || cmd_count < 0) return;
+
+    for (int32_t i = 0; i < cmd_count; i++) {
+        uint8_t opcode = 0;
+        uint8_t cmd_flags = 0;
+        uint16_t payload_len = 0;
+        if (!r.read_u8(&opcode) || !r.read_u8(&cmd_flags) || !r.read_u16(&payload_len)) return;
+        (void)cmd_flags;
+        if (!r.can_read((int32_t)payload_len)) return;
+        const int32_t payload_end = r.pos + (int32_t)payload_len;
+
+        switch (opcode) {
+            case BACKEND_CMD_PASS_BEGIN: {
+                int32_t pass = -1;
+                float clear_depth = 1.0f;
+                if (!r.read_i32(&pass) || !r.read_f32(&clear_depth)) return;
+                sg_pass sgp = {};
+                if (pass >= 0 && pass * 2 < (int32_t)e->views.size()) {
+                    sgp.attachments.depth_stencil = e->views[pass * 2];
+                }
+                sgp.action.depth.load_action = SG_LOADACTION_CLEAR;
+                sgp.action.depth.clear_value = clear_depth;
+                sg_begin_pass(&sgp);
+                break;
+            }
+            case BACKEND_CMD_PASS_BEGIN_DEFAULT: {
+                float cr = 0, cg = 0, cb = 0, ca = 1, depth = 1;
+                if (!r.read_f32(&cr) || !r.read_f32(&cg) || !r.read_f32(&cb) || !r.read_f32(&ca) || !r.read_f32(&depth)) return;
+                sg_pass sgp = {};
+                sgp.swapchain = get_swapchain();
+                sgp.action.colors[0].load_action = SG_LOADACTION_CLEAR;
+                sgp.action.colors[0].clear_value = {cr, cg, cb, ca};
+                sgp.action.depth.load_action = SG_LOADACTION_CLEAR;
+                sgp.action.depth.clear_value = depth;
+                sg_begin_pass(&sgp);
+                break;
+            }
+            case BACKEND_CMD_PASS_END: {
+                sg_end_pass();
+                break;
+            }
+            case BACKEND_CMD_APPLY_PIPELINE: {
+                int32_t pip = -1;
+                if (!r.read_i32(&pip)) return;
+                if (pip < 0 || pip >= (int32_t)e->pipelines.size()) return;
+                sg_apply_pipeline(e->pipelines[pip]);
+                e->current_bindings = {};
+                break;
+            }
+            case BACKEND_CMD_BIND_MESH: {
+                int32_t mesh = -1;
+                if (!r.read_i32(&mesh)) return;
+                if (mesh < 0 || mesh >= (int32_t)e->meshes.size()) return;
+                e->current_bindings.vertex_buffers[0] = e->meshes[mesh].bind.vertex_buffers[0];
+                e->current_bindings.index_buffer = e->meshes[mesh].bind.index_buffer;
+                break;
+            }
+            case BACKEND_CMD_BIND_IMAGE: {
+                int32_t slot = 0, img = -1, smp = -1;
+                if (!r.read_i32(&slot) || !r.read_i32(&img) || !r.read_i32(&smp)) return;
+                if (img < 0 || img >= (int32_t)e->images.size()) return;
+                if (smp < 0 || smp >= (int32_t)e->samplers.size()) return;
+                e->current_bindings.views[slot] = e->views[img * 2 + 1];
+                e->current_bindings.samplers[slot] = e->samplers[smp];
+                break;
+            }
+            case BACKEND_CMD_APPLY_UNIFORMS: {
+                int32_t slot = 0;
+                int32_t ulen = 0;
+                if (!r.read_i32(&slot) || !r.read_i32(&ulen)) return;
+                if (ulen < 0 || !r.can_read(ulen)) return;
+                const uint8_t* bytes = r.ptr();
+                sg_range range = {bytes, (size_t)ulen};
+                sg_apply_uniforms(slot, &range);
+                if (!r.skip(ulen)) return;
+                break;
+            }
+            case BACKEND_CMD_DRAW_ELEMENTS: {
+                int32_t base = 0, count = 0, instances = 0;
+                if (!r.read_i32(&base) || !r.read_i32(&count) || !r.read_i32(&instances)) return;
+                sg_apply_bindings(&e->current_bindings);
+                sg_draw(base, count, instances);
+                break;
+            }
+            case BACKEND_CMD_COMMIT: {
+                sg_commit();
+                break;
+            }
+            default:
+                return;
+        }
+
+        if (r.pos != payload_end) {
+            r.pos = payload_end;
+        }
     }
-    pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    pass.action.depth.clear_value = clear_depth;
-    sg_begin_pass(&pass);
-}
-
-EXPORT void backend_pass_begin_default(backend_t et,
-                                       float r, float g, float b, float a,
-                                       float depth) {
-    if (!e || et != 0) return;
-
-    sg_pass pass = {};
-    pass.swapchain = get_swapchain();
-    pass.action.colors[0].load_action = SG_LOADACTION_CLEAR;
-    pass.action.colors[0].clear_value = {r, g, b, a};
-    pass.action.depth.load_action = SG_LOADACTION_CLEAR;
-    pass.action.depth.clear_value = depth;
-    sg_begin_pass(&pass);
-}
-
-EXPORT void backend_pass_end(backend_t et) {
-    if (!e || et != 0) return;
-    sg_end_pass();
-}
-
-EXPORT void backend_commit(backend_t et) {
-    if (!e || et != 0) return;
-    sg_commit();
-}
-
-EXPORT void backend_apply_pipeline(backend_t et, pipeline_t p) {
-    if (!e || et != 0) return;
-    if (p < 0 || p >= (pipeline_t)e->pipelines.size()) return;
-    sg_apply_pipeline(e->pipelines[p]);
-    e->current_bindings = {};
-}
-
-EXPORT void backend_bind_mesh(backend_t et, mesh_t m) {
-    if (!e || et != 0) return;
-    if (m < 0 || m >= (mesh_t)e->meshes.size()) return;
-    e->current_bindings.vertex_buffers[0] = e->meshes[m].bind.vertex_buffers[0];
-    e->current_bindings.index_buffer = e->meshes[m].bind.index_buffer;
-}
-
-EXPORT void backend_bind_image(backend_t et, int32_t slot, image_t img, sampler_t smp) {
-    if (!e || et != 0) return;
-    if (img < 0 || img >= (image_t)e->images.size()) return;
-    if (smp < 0 || smp >= (sampler_t)e->samplers.size()) return;
-    /* Texture view is at views[img*2+1] */
-    e->current_bindings.views[slot] = e->views[img * 2 + 1];
-    e->current_bindings.samplers[slot] = e->samplers[smp];
-}
-
-EXPORT void backend_apply_uniforms(backend_t et, int32_t slot, void* data, int32_t len) {
-    if (!e || et != 0) return;
-    sg_range range = {data, (size_t)len};
-    sg_apply_uniforms(slot, &range);
-}
-
-EXPORT void backend_draw_elements(backend_t et, int32_t base, int32_t count, int32_t instances) {
-    if (!e || et != 0) return;
-    sg_apply_bindings(&e->current_bindings);
-    sg_draw(base, count, instances);
 }
 
 } /* extern "C" */

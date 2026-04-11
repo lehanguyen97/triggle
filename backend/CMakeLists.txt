@@ -67,7 +67,7 @@ if(EMSCRIPTEN)
     set_target_properties(
         triggle PROPERTIES
         SUFFIX ".js"
-        LINK_FLAGS "-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 --emit-symbol-map -sEXPORTED_FUNCTIONS=_main,_malloc,_free,_backend_mesh_index_count,_backend_mesh_index_type,_backend_mesh_get_info,_backend_gltf_load,_backend_gltf_unload,_backend_gltf_primitive_count,_backend_gltf_primitive_mesh,_backend_init,_backend_cleanup,_backend_malloc,_backend_free,_backend_mesh_create,_backend_mesh_destroy,_backend_shader_create,_backend_pipeline_create,_backend_image_create_target,_backend_sampler_create,_backend_pass_create,_backend_pass_begin,_backend_pass_begin_default,_backend_pass_end,_backend_commit,_backend_apply_pipeline,_backend_bind_mesh,_backend_bind_image,_backend_apply_uniforms,_backend_draw_elements -sEXPORTED_RUNTIME_METHODS=wasmMemory,addRunDependency,removeRunDependency"
+        LINK_FLAGS "-sMIN_WEBGL_VERSION=2 -sMAX_WEBGL_VERSION=2 --emit-symbol-map -sEXPORTED_FUNCTIONS=_main,_malloc,_free -sEXPORTED_RUNTIME_METHODS=wasmMemory,addRunDependency,removeRunDependency"
     )
     target_link_options(triggle PRIVATE
         "SHELL:--preload-file ${CMAKE_SOURCE_DIR}/assets@/assets"

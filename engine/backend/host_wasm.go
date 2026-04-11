@@ -22,12 +22,6 @@ func _backend_mesh_create(e int32, verts uint32, vertBytes int32, indices uint32
 //go:wasmimport env backend_mesh_destroy
 func _backend_mesh_destroy(m int32)
 
-//go:wasmimport env backend_mesh_index_count
-func _backend_mesh_index_count(m int32) int32
-
-//go:wasmimport env backend_mesh_index_type
-func _backend_mesh_index_type(m int32) int32
-
 //go:wasmimport env backend_mesh_get_info
 func _backend_mesh_get_info(m int32, out uint32)
 
@@ -58,32 +52,8 @@ func _backend_sampler_create(e int32, minFilter int32, magFilter int32, wrap int
 //go:wasmimport env backend_pass_create
 func _backend_pass_create(e int32, color int32, depth int32) int32
 
-//go:wasmimport env backend_pass_begin
-func _backend_pass_begin(e int32, pass int32, clearDepth float32)
-
-//go:wasmimport env backend_pass_begin_default
-func _backend_pass_begin_default(e int32, r float32, g float32, b float32, a float32, depth float32)
-
-//go:wasmimport env backend_pass_end
-func _backend_pass_end(e int32)
-
-//go:wasmimport env backend_commit
-func _backend_commit(e int32)
-
-//go:wasmimport env backend_apply_pipeline
-func _backend_apply_pipeline(e int32, p int32)
-
-//go:wasmimport env backend_bind_mesh
-func _backend_bind_mesh(e int32, m int32)
-
-//go:wasmimport env backend_bind_image
-func _backend_bind_image(e int32, slot int32, img int32, smp int32)
-
-//go:wasmimport env backend_apply_uniforms
-func _backend_apply_uniforms(e int32, slot int32, data uint32, length int32)
-
-//go:wasmimport env backend_draw_elements
-func _backend_draw_elements(e int32, base int32, count int32, instances int32)
+//go:wasmimport env backend_submit_command_buffer
+func _backend_submit_command_buffer(e int32, data uint32, length int32)
 
 //go:wasmimport env bulk_copy
 func _bulk_copy(dst_backend uint32, src_game uint32, length int32)
@@ -108,8 +78,6 @@ func init() {
 		return _backend_mesh_create(e, uint32(verts), vertBytes, uint32(indices), idxBytes)
 	}
 	Host.Mesh.Destroy = func(m int32) { _backend_mesh_destroy(m) }
-	Host.Mesh.IndexCount = func(m int32) int32 { return _backend_mesh_index_count(m) }
-	Host.Mesh.IndexType = func(m int32) int32 { return _backend_mesh_index_type(m) }
 	Host.Mesh.Info = func(m int32, out Ptr) { _backend_mesh_get_info(m, uint32(out)) }
 
 	Host.Gltf.Load = func(e int32, path Ptr) int32 {
@@ -142,23 +110,7 @@ func init() {
 	Host.Pass.Create = func(e int32, color, depth int32) int32 {
 		return _backend_pass_create(e, color, depth)
 	}
-	Host.Pass.Begin = func(e int32, p int32, clearDepth float32) {
-		_backend_pass_begin(e, p, clearDepth)
-	}
-	Host.Pass.BeginDefault = func(e int32, r, g, b, a, depth float32) {
-		_backend_pass_begin_default(e, r, g, b, a, depth)
-	}
-	Host.Pass.End = func(e int32) { _backend_pass_end(e) }
-
-	Host.Commit = func(e int32) { _backend_commit(e) }
-
-	Host.Draw.ApplyPipeline = func(e int32, p int32) { _backend_apply_pipeline(e, p) }
-	Host.Draw.BindMesh = func(e int32, m int32) { _backend_bind_mesh(e, m) }
-	Host.Draw.BindImage = func(e int32, slot, img, smp int32) { _backend_bind_image(e, slot, img, smp) }
-	Host.Draw.ApplyUniforms = func(e int32, slot int32, data Ptr, length int32) {
-		_backend_apply_uniforms(e, slot, uint32(data), length)
-	}
-	Host.Draw.DrawElements = func(e int32, base, count, instances int32) {
-		_backend_draw_elements(e, base, count, instances)
+	Host.Draw.SubmitCommandBuffer = func(e int32, data Ptr, length int32) {
+		_backend_submit_command_buffer(e, uint32(data), length)
 	}
 }

@@ -2,6 +2,16 @@ package render
 
 import mgl "github.com/go-gl/mathgl/mgl32"
 
+// RenderProgramID selects the main-pass program used for one drawable.
+type RenderProgramID int32
+
+const (
+	// RenderProgramPhong is the default lit + shadowed program.
+	RenderProgramPhong RenderProgramID = iota
+	// RenderProgramToon is an example non-shadowed toon-lit program.
+	RenderProgramToon
+)
+
 // CameraState is passed each frame from game code.
 type CameraState struct {
 	ViewProj  mgl.Mat4
@@ -16,10 +26,11 @@ type LightState struct {
 
 // SceneDrawable is intent-level geometry for one draw (mesh handle + transform).
 // Index metadata is cached at mesh registration time (not queried per draw).
-// Ambient is the Phong diffuse ambient term for this drawable (per-draw until a material table exists).
+// Ambient is a per-draw color/tint term consumed by the selected RenderProgram.
 type SceneDrawable struct {
 	Mesh       int32
 	Model      mgl.Mat4
+	Program    RenderProgramID
 	MaterialID int32
 	Ambient    mgl.Vec3
 }

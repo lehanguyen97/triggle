@@ -20,17 +20,17 @@ Handle-bound (`engine_t` inside `Backend`); methods do not pass an engine handle
 
 **glTF** — `GltfLoad`, `GltfUnload`, `GltfPrimitiveCount`, `GltfPrimitiveMesh` (parse/upload stays C++).
 
-**Rest** — shaders, pipelines, images, samplers, passes, bind, uniforms, `DrawElements`, `Commit` (see `host.go` / `backend_api.h`).
+**Rest** — shaders, pipelines, images, samplers, pass resources, and `SubmitCommandBuffer` for frame rendering (see `host.go` / `backend_api.h`).
 
 ## 2) Render runtime (`engine/render`)
 
-**SceneDrawable** — per-submit intent: `Mesh`, `Model`, `MaterialID`, `Ambient`. No index fields on the struct; index count/type live in the renderer cache.
+**SceneDrawable** — per-submit intent: `Mesh`, `Model`, `Program`, `MaterialID`, `Ambient`. No index fields on the struct; index count/type live in the renderer cache.
 
 **Renderer** (`types.go`)
 
 - `BeginFrame(cam, lights)`, `SubmitShadow(d)`, `SubmitMain(d)`, `EndFrame()` — shadow and main queues differ in order/culling.
 
-**PhongRenderer** (concrete implementation)
+**ForwardRenderer** (concrete implementation)
 
 - **`mesh map[int32]MeshInfo`** — filled at registration; draw uses this (not `MeshIndexCount` / `MeshIndexType` each pass).
 - `RegisterMeshInfo(mesh, indexCount, indexType)` — after glTF primitive or any mesh whose metadata the game owns.
@@ -38,6 +38,7 @@ Handle-bound (`engine_t` inside `Backend`); methods do not pass an engine handle
 - `DestroyMesh` — `MeshDestroy` + delete from map.
 - `ForgetMesh` — delete from map only (e.g. after `GltfUnload`, which destroys meshes without going through `DestroyMesh`).
 - `meshInfo(handle)` — map hit, else **lazy** one `gpu.MeshInfo` and cache (fallback if something forgot `RegisterMeshInfo`).
+- `EndFrame()` encodes shadow + main pass commands into one byte stream, does one `BulkCopy`, then one `SubmitCommandBuffer`.
 
 **Helpers**
 

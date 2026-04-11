@@ -9,7 +9,7 @@ This doc continues the “Blender-like” / materials discussion: **what exists 
 | **Load** | `engine_gltf_load(e, path)` → `asset` id. Unpacks geometry into **Phong-compatible** interleaved vertices (pos, normal, vertex color or white) + indices; uploads **one `mesh_t` per primitive**. |
 | **Query** | `engine_gltf_primitive_count`, `engine_gltf_primitive_mesh`, `engine_mesh_index_count`. |
 | **Unload** | `engine_gltf_unload(e, asset)` destroys uploaded meshes. |
-| **Draw** | Same as the rest of the game: `engine_apply_pipeline`, `engine_bind_mesh`, uniforms, `engine_draw_elements`. Shader is **your** Phong + shadow (not glTF PBR yet). |
+| **Draw** | Submitted through renderer command buffer path (`ForwardRenderer` + `RenderProgram`). Shader is currently Phong/Toon style (not glTF PBR yet). |
 
 **Go** mirrors this via `Engine.GltfLoad`, `GltfPrimitiveMesh`, `MeshIndexCount`, etc. Paths are **strings** copied into engine memory for the C loader.
 
@@ -93,7 +93,7 @@ void engine_draw_gltf_primitive(engine_t e,
     pipeline_t pip /* or material resolves pip internally */);
 ```
 
-Or keep **explicit** `apply_pipeline` → `bind_mesh` → `bind_image` → `apply_uniforms` → `draw_elements` so Go matches the rest of the game.
+Or keep draw orchestration in Go renderer and emit only command-buffer records to backend.
 
 ---
 
@@ -104,15 +104,11 @@ init:
   asset := engine.GltfLoad("/assets/models/prop.glb")
   prim0 := engine.GltfPrimitiveMesh(asset, 0)
   mat0  := engine.GltfPrimitiveMaterial(asset, 0)   // future
-  count := engine.MeshIndexCount(prim0)
   pip   := choosePipeline(engine.GltfPrimitiveDoubleSided(asset, 0))  // main vs no-cull
 
 per frame:
-  engine.ApplyPipeline(pip)
-  engine.BindMesh(prim0)
-  engine.BindImage(albedoSlot, albedoImage, albedoSampler)  // future
-  // set uniforms: model, viewProj, light, material factors
-  engine.DrawElements(0, count, 1)
+  rnd.SubmitMain(render.SceneDrawable{Mesh: prim0, Program: render.RenderProgramPhong, ...})
+  rnd.EndFrame() // encodes + submits frame command buffer
 ```
 
 **Metadata DB (later):** map `"player_token"` → `{ file, mesh_or_prim_index }`; Go only stores **logical id** and **transform**, not glTF JSON.

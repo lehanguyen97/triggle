@@ -18,8 +18,6 @@ type GPU interface {
 
 	MeshCreate(verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
 	MeshDestroy(mesh int32)
-	MeshIndexCount(mesh int32) int32
-	MeshIndexType(mesh int32) int32
 	MeshInfo(mesh int32) (MeshInfo, bool)
 
 	GltfLoad(path string) int32
@@ -34,17 +32,7 @@ type GPU interface {
 	SamplerCreate(minFilter, magFilter, wrap, compare int32) int32
 
 	PassCreate(color, depth int32) int32
-	PassBegin(pass int32, clearDepth float32)
-	PassBeginDefault(r, g, b, a, depth float32)
-	PassEnd()
-
-	ApplyPipeline(p int32)
-	BindMesh(m int32)
-	BindImage(slot, img, smp int32)
-	ApplyUniforms(slot int32, data Ptr, length int32)
-	DrawElements(base, count, instances int32)
-
-	Commit()
+	SubmitCommandBuffer(data Ptr, length int32)
 }
 
 type BackendHost struct {
@@ -61,8 +49,6 @@ type BackendHost struct {
 	Mesh struct {
 		Create     func(e int32, verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
 		Destroy    func(m int32)
-		IndexCount func(m int32) int32
-		IndexType  func(m int32) int32
 		Info       func(m int32, out Ptr)
 	}
 
@@ -90,21 +76,12 @@ type BackendHost struct {
 	}
 
 	Pass struct {
-		Create       func(e int32, color, depth int32) int32
-		Begin        func(e int32, p int32, clearDepth float32)
-		BeginDefault func(e int32, r, g, b, a, depth float32)
-		End          func(e int32)
+		Create func(e int32, color, depth int32) int32
 	}
 
 	Draw struct {
-		ApplyPipeline func(e int32, p int32)
-		BindMesh      func(e int32, m int32)
-		BindImage     func(e int32, slot, img, smp int32)
-		ApplyUniforms func(e int32, slot int32, data Ptr, length int32)
-		DrawElements  func(e int32, base, count, instances int32)
+		SubmitCommandBuffer func(e int32, data Ptr, length int32)
 	}
-
-	Commit func(e int32)
 }
 
 // Backend wraps a handle and delegates to Host.
@@ -138,9 +115,7 @@ func (e Backend) BulkCopyBack(dst unsafe.Pointer, src Ptr, length int32) {
 func (e Backend) MeshCreate(verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32 {
 	return Host.Mesh.Create(e.handle, verts, vertBytes, indices, idxBytes)
 }
-func (e Backend) MeshDestroy(mesh int32)          { Host.Mesh.Destroy(mesh) }
-func (e Backend) MeshIndexCount(mesh int32) int32 { return Host.Mesh.IndexCount(mesh) }
-func (e Backend) MeshIndexType(mesh int32) int32  { return Host.Mesh.IndexType(mesh) }
+func (e Backend) MeshDestroy(mesh int32) { Host.Mesh.Destroy(mesh) }
 func (e Backend) MeshInfo(mesh int32) (MeshInfo, bool) {
 	out := e.Malloc(8)
 	defer e.Free(out)
@@ -200,21 +175,6 @@ func (e Backend) SamplerCreate(minFilter, magFilter, wrap, compare int32) int32 
 func (e Backend) PassCreate(color, depth int32) int32 {
 	return Host.Pass.Create(e.handle, color, depth)
 }
-func (e Backend) PassBegin(pass int32, clearDepth float32) {
-	Host.Pass.Begin(e.handle, pass, clearDepth)
-}
-func (e Backend) PassBeginDefault(r, g, b, a, depth float32) {
-	Host.Pass.BeginDefault(e.handle, r, g, b, a, depth)
-}
-func (e Backend) PassEnd() { Host.Pass.End(e.handle) }
-func (e Backend) Commit()  { Host.Commit(e.handle) }
-
-func (e Backend) ApplyPipeline(p int32)          { Host.Draw.ApplyPipeline(e.handle, p) }
-func (e Backend) BindMesh(m int32)               { Host.Draw.BindMesh(e.handle, m) }
-func (e Backend) BindImage(slot, img, smp int32) { Host.Draw.BindImage(e.handle, slot, img, smp) }
-func (e Backend) ApplyUniforms(slot int32, data Ptr, length int32) {
-	Host.Draw.ApplyUniforms(e.handle, slot, data, length)
-}
-func (e Backend) DrawElements(base, count, instances int32) {
-	Host.Draw.DrawElements(e.handle, base, count, instances)
+func (e Backend) SubmitCommandBuffer(data Ptr, length int32) {
+	Host.Draw.SubmitCommandBuffer(e.handle, data, length)
 }

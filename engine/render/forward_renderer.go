@@ -1,0 +1,306 @@
+package render
+
+import (
+	"unsafe"
+
+	"triggle/engine/backend"
+	"triggle/engine/gfx"
+	"triggle/engine/shader"
+)
+
+// ForwardRenderer implements a forward render pipeline with shadow and main passes.
+var _ Renderer = (*ForwardRenderer)(nil)
+
+// MainRenderProgram encapsulates one main-pass shader program and its GPU-owned state.
+type MainRenderProgram interface {
+	Init(gpu backend.Backend, cache *PipelineFamilyCache) bool
+	MainFamily() PipelineFamilyID
+	BindMain(r *ForwardRenderer)
+	DrawMain(r *ForwardRenderer, d SceneDrawable, indexCount int32)
+	Release(gpu backend.Backend)
+}
+
+type ForwardRenderer struct {
+	gpu   backend.Backend
+	cache *PipelineFamilyCache
+	mesh  map[int32]backend.MeshInfo
+
+	programs map[RenderProgramID]MainRenderProgram
+
+	shadowShader int32
+	shadowFamily PipelineFamilyID
+
+	shadowMap     int32
+	shadowSampler int32
+	shadowPass    int32
+
+	cmdBuf    commandBuffer
+	cmdPtr    backend.Ptr
+	cmdPtrCap int32
+
+	cam   CameraState
+	light LightState
+
+	shadowDraws []SceneDrawable
+	mainDraws   []SceneDrawable
+}
+
+// NewForwardRenderer builds shadow resources and registers built-in main-pass programs.
+func NewForwardRenderer(gpu backend.Backend) *ForwardRenderer {
+	r := &ForwardRenderer{
+		gpu:      gpu,
+		cache:    NewPipelineFamilyCache(gpu),
+		mesh:     make(map[int32]backend.MeshInfo),
+		programs: make(map[RenderProgramID]MainRenderProgram),
+	}
+
+	r.shadowShader = gfx.CreateShader(gpu, shader.ShadowShaderDesc())
+
+	stride := int32(gfx.PhongVertexStride)
+
+	r.shadowFamily = r.cache.RegisterPipelineFamily(PipelineFamilyDesc{
+		Shader:     r.shadowShader,
+		Stride:     stride,
+		Attrs:      []int{gfx.AttrFloat3},
+		DepthCmp:   gfx.CmpLessEqual,
+		DepthWrite: true,
+		Cull:       gfx.CullFront,
+		ColorCount: 0,
+	})
+
+	r.RegisterRenderProgram(RenderProgramPhong, NewPhongProgram())
+	r.RegisterRenderProgram(RenderProgramToon, NewToonProgram())
+
+	r.shadowMap = gpu.ImageCreateTarget(1024, 1024, gfx.PixfmtDepth)
+	// Nearest filtering: WebGL warns that LINEAR + depth comparison is implementation-defined.
+	r.shadowSampler = gpu.SamplerCreate(gfx.FilterNearest, gfx.FilterNearest, gfx.WrapClampToEdge, gfx.CmpLessEqual)
+	r.shadowPass = gpu.PassCreate(-1, r.shadowMap)
+
+	return r
+}
+
+// RegisterRenderProgram installs or replaces a main-pass program by id.
+func (r *ForwardRenderer) RegisterRenderProgram(id RenderProgramID, program MainRenderProgram) bool {
+	if program == nil {
+		return false
+	}
+	if !program.Init(r.gpu, r.cache) {
+		return false
+	}
+	if old, ok := r.programs[id]; ok {
+		old.Release(r.gpu)
+	}
+	r.programs[id] = program
+	return true
+}
+
+// GPU returns the backend handle for mesh upload and other direct calls.
+func (r *ForwardRenderer) GPU() backend.Backend { return r.gpu }
+
+// RegisterMeshInfo records immutable mesh metadata for draw-time cache lookups.
+func (r *ForwardRenderer) RegisterMeshInfo(mesh int32, indexCount int32, indexType int32) bool {
+	if mesh < 0 || indexCount <= 0 {
+		return false
+	}
+	r.mesh[mesh] = backend.MeshInfo{IndexCount: indexCount, IndexType: indexType}
+	return true
+}
+
+// UploadMesh uploads u16-indexed geometry and registers mesh metadata once.
+func (r *ForwardRenderer) UploadMesh(vertices []float32, indices []uint16) int32 {
+	mesh := gfx.UploadMesh(r.gpu, vertices, indices)
+	if mesh >= 0 {
+		r.RegisterMeshInfo(mesh, int32(len(indices)), gfx.IndexUint16)
+	}
+	return mesh
+}
+
+// DestroyMesh releases the mesh and invalidates cached metadata.
+func (r *ForwardRenderer) DestroyMesh(mesh int32) {
+	if mesh < 0 {
+		return
+	}
+	r.gpu.MeshDestroy(mesh)
+	delete(r.mesh, mesh)
+}
+
+// ForgetMesh removes metadata for meshes owned by external lifecycles (e.g. glTF asset unload).
+func (r *ForwardRenderer) ForgetMesh(mesh int32) {
+	delete(r.mesh, mesh)
+}
+
+// BeginFrame clears submission queues and stores camera/light for this frame.
+func (r *ForwardRenderer) BeginFrame(cam CameraState, lights LightState) {
+	r.cam = cam
+	r.light = lights
+	r.shadowDraws = r.shadowDraws[:0]
+	r.mainDraws = r.mainDraws[:0]
+}
+
+// SubmitShadow queues geometry for the shadow map pass (typically a subset, in light-space order).
+func (r *ForwardRenderer) SubmitShadow(d SceneDrawable) {
+	r.shadowDraws = append(r.shadowDraws, d)
+}
+
+// SubmitMain queues geometry for the main color pass (full scene order).
+func (r *ForwardRenderer) SubmitMain(d SceneDrawable) {
+	r.mainDraws = append(r.mainDraws, d)
+}
+
+// EndFrame runs shadow pass, then main pass, then commit.
+func (r *ForwardRenderer) EndFrame() {
+	r.cmdBuf.beginFrame()
+	r.emitPassBegin(r.shadowPass, 1.0)
+	for _, d := range r.shadowDraws {
+		meta, ok := r.meshInfo(d.Mesh)
+		if !ok {
+			continue
+		}
+		pip := r.cache.Pipeline(r.shadowFamily, meta.IndexType)
+		r.emitApplyPipeline(pip)
+		r.emitBindMesh(d.Mesh)
+		mvp := r.light.LightVP.Mul4(d.Model)
+		r.emitApplyUniforms(0, bytesFromFloat32Slice(mvp[:]))
+		r.emitDrawElements(0, meta.IndexCount, 1)
+	}
+	r.emitPassEnd()
+
+	r.emitPassBeginDefault(0.15, 0.15, 0.2, 1.0, 1.0)
+	for _, d := range r.mainDraws {
+		meta, ok := r.meshInfo(d.Mesh)
+		if !ok {
+			continue
+		}
+		prog := r.mainProgram(d.Program)
+		if prog == nil {
+			continue
+		}
+		pip := r.cache.Pipeline(prog.MainFamily(), meta.IndexType)
+		r.emitApplyPipeline(pip)
+		prog.BindMain(r)
+		r.emitBindMesh(d.Mesh)
+		prog.DrawMain(r, d, meta.IndexCount)
+	}
+	r.emitPassEnd()
+	r.emitCommit()
+	r.flushCommandBuffer()
+}
+
+func (r *ForwardRenderer) mainProgram(id RenderProgramID) MainRenderProgram {
+	if p, ok := r.programs[id]; ok {
+		return p
+	}
+	if p, ok := r.programs[RenderProgramPhong]; ok {
+		return p
+	}
+	return nil
+}
+
+func (r *ForwardRenderer) meshInfo(mesh int32) (backend.MeshInfo, bool) {
+	if info, ok := r.mesh[mesh]; ok && info.IndexCount > 0 {
+		return info, true
+	}
+	info, ok := r.gpu.MeshInfo(mesh)
+	if !ok {
+		return backend.MeshInfo{}, false
+	}
+	r.mesh[mesh] = info
+	return info, true
+}
+
+// Release frees GPU allocations owned by the renderer (not meshes owned by game).
+func (r *ForwardRenderer) Release() {
+	g := r.gpu
+	for _, p := range r.programs {
+		p.Release(g)
+	}
+	if r.cmdPtr != 0 {
+		g.Free(r.cmdPtr)
+		r.cmdPtr = 0
+		r.cmdPtrCap = 0
+	}
+}
+
+func (r *ForwardRenderer) emitPassBegin(pass int32, clearDepth float32) {
+	r.cmdBuf.emit(cmdPassBegin, func() {
+		r.cmdBuf.appendI32(pass)
+		r.cmdBuf.appendF32(clearDepth)
+	})
+}
+
+func (r *ForwardRenderer) emitPassBeginDefault(red, green, blue, alpha, depth float32) {
+	r.cmdBuf.emit(cmdPassBeginDefault, func() {
+		r.cmdBuf.appendF32(red)
+		r.cmdBuf.appendF32(green)
+		r.cmdBuf.appendF32(blue)
+		r.cmdBuf.appendF32(alpha)
+		r.cmdBuf.appendF32(depth)
+	})
+}
+
+func (r *ForwardRenderer) emitPassEnd() {
+	r.cmdBuf.emit(cmdPassEnd, func() {})
+}
+
+func (r *ForwardRenderer) emitApplyPipeline(pipeline int32) {
+	r.cmdBuf.emit(cmdApplyPipeline, func() {
+		r.cmdBuf.appendI32(pipeline)
+	})
+}
+
+func (r *ForwardRenderer) emitBindMesh(mesh int32) {
+	r.cmdBuf.emit(cmdBindMesh, func() {
+		r.cmdBuf.appendI32(mesh)
+	})
+}
+
+func (r *ForwardRenderer) emitBindImage(slot, image, sampler int32) {
+	r.cmdBuf.emit(cmdBindImage, func() {
+		r.cmdBuf.appendI32(slot)
+		r.cmdBuf.appendI32(image)
+		r.cmdBuf.appendI32(sampler)
+	})
+}
+
+func (r *ForwardRenderer) emitApplyUniforms(slot int32, data []byte) {
+	r.cmdBuf.emit(cmdApplyUniforms, func() {
+		r.cmdBuf.appendI32(slot)
+		r.cmdBuf.appendI32(int32(len(data)))
+		r.cmdBuf.appendBytes(data)
+	})
+}
+
+func (r *ForwardRenderer) emitDrawElements(base, count, instances int32) {
+	r.cmdBuf.emit(cmdDrawElements, func() {
+		r.cmdBuf.appendI32(base)
+		r.cmdBuf.appendI32(count)
+		r.cmdBuf.appendI32(instances)
+	})
+}
+
+func (r *ForwardRenderer) emitCommit() {
+	r.cmdBuf.emit(cmdCommit, func() {})
+}
+
+func (r *ForwardRenderer) flushCommandBuffer() {
+	buf := r.cmdBuf.finish()
+	if len(buf) == 0 {
+		return
+	}
+	if r.cmdPtr == 0 || r.cmdPtrCap < int32(len(buf)) {
+		if r.cmdPtr != 0 {
+			r.gpu.Free(r.cmdPtr)
+		}
+		r.cmdPtr = r.gpu.Malloc(int32(len(buf)))
+		r.cmdPtrCap = int32(len(buf))
+	}
+	r.gpu.BulkCopy(r.cmdPtr, unsafe.Pointer(&buf[0]), int32(len(buf)))
+	r.gpu.SubmitCommandBuffer(r.cmdPtr, int32(len(buf)))
+}
+
+func bytesFromFloat32Slice(vals []float32) []byte {
+	if len(vals) == 0 {
+		return nil
+	}
+	return unsafe.Slice((*byte)(unsafe.Pointer(&vals[0])), len(vals)*4)
+}

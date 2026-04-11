@@ -29,8 +29,6 @@ func init() {
 			unsafe.Pointer(indices), C.int(idxBytes)))
 	}
 	Host.Mesh.Destroy = func(m int32) { C.backend_mesh_destroy(C.mesh_t(m)) }
-	Host.Mesh.IndexCount = func(m int32) int32 { return int32(C.backend_mesh_index_count(C.mesh_t(m))) }
-	Host.Mesh.IndexType = func(m int32) int32 { return int32(C.backend_mesh_index_type(C.mesh_t(m))) }
 	Host.Mesh.Info = func(m int32, out Ptr) {
 		C.backend_mesh_get_info(C.mesh_t(m), (*C.backend_mesh_info_t)(unsafe.Pointer(out)))
 	}
@@ -68,30 +66,7 @@ func init() {
 	Host.Pass.Create = func(e int32, color, depth int32) int32 {
 		return int32(C.backend_pass_create(C.backend_t(e), C.image_t(color), C.image_t(depth)))
 	}
-	Host.Pass.Begin = func(e int32, p int32, clearDepth float32) {
-		C.backend_pass_begin(C.backend_t(e), C.pass_t(p), C.float(clearDepth))
-	}
-	Host.Pass.BeginDefault = func(e int32, r, g, b, a, depth float32) {
-		C.backend_pass_begin_default(C.backend_t(e),
-			C.float(r), C.float(g), C.float(b), C.float(a), C.float(depth))
-	}
-	Host.Pass.End = func(e int32) { C.backend_pass_end(C.backend_t(e)) }
-
-	Host.Commit = func(e int32) { C.backend_commit(C.backend_t(e)) }
-
-	Host.Draw.ApplyPipeline = func(e int32, p int32) {
-		C.backend_apply_pipeline(C.backend_t(e), C.pipeline_t(p))
-	}
-	Host.Draw.BindMesh = func(e int32, m int32) {
-		C.backend_bind_mesh(C.backend_t(e), C.mesh_t(m))
-	}
-	Host.Draw.BindImage = func(e int32, slot, img, smp int32) {
-		C.backend_bind_image(C.backend_t(e), C.int(slot), C.image_t(img), C.sampler_t(smp))
-	}
-	Host.Draw.ApplyUniforms = func(e int32, slot int32, data Ptr, length int32) {
-		C.backend_apply_uniforms(C.backend_t(e), C.int(slot), unsafe.Pointer(data), C.int(length))
-	}
-	Host.Draw.DrawElements = func(e int32, base, count, instances int32) {
-		C.backend_draw_elements(C.backend_t(e), C.int(base), C.int(count), C.int(instances))
+	Host.Draw.SubmitCommandBuffer = func(e int32, data Ptr, length int32) {
+		C.backend_submit_command_buffer(C.backend_t(e), unsafe.Pointer(data), C.int(length))
 	}
 }
