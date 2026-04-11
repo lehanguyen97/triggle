@@ -83,6 +83,7 @@ backend/ (C++ / Emscripten)
 - **RenderProgram abstraction**: main pass program is now selected per drawable (`RenderProgramPhong` default, `RenderProgramToon` sample), while pass orchestration stays shared in one renderer
 - **Command-buffer render path**: `ForwardRenderer.EndFrame` now encodes a full frame command stream, does one `BulkCopy` to backend memory, then one `SubmitCommandBuffer` boundary call; per-draw immediate calls were removed
 - **Program-owned state**: `PhongProgram` / `ToonProgram` own shader source + descriptor and emit command payloads; per-program backend uniform pointers were removed
+- **GLSL source layout**: shader source now lives as `*.vs.glsl` / `*.fs.glsl` in `engine/shader/` and is embedded via `go:embed` into shader descriptors (for editor syntax highlighting)
 
 ## Build
 

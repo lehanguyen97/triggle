@@ -3,6 +3,8 @@
 #include <string.h>
 
 #include <deque>
+#include <string>
+
 #include "backend.hpp"
 
 #ifdef __EMSCRIPTEN__
