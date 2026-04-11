@@ -6,7 +6,7 @@
 
 - `game/` — wasip1 `main`, rules, board; imports `triggle/engine`, submits draws.
 - `engine/` — Go module only: `backend/`, `gfx/`, `shader/`, `render/`.
-- `backend/` — C++/Emscripten + Sokol (`include/e/backend_api.h`, `src/backend_api_impl.cpp`).
+- `backend/` — C++/Emscripten + Sokol (`include/e/backend_api.h`, `src/api_impl.cpp`).
 
 ## 1) Bridge (`engine/backend`) — `GPU` / `Backend`
 

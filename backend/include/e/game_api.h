@@ -61,6 +61,14 @@ int32_t game_event(game_t game,
     int32_t win_w, int32_t win_h);
 int32_t game_cleanup(game_t game);
 
+/*
+ * Game → host logging — implemented by the native executable (stderr) or WASM env imports
+ * (see triggle.html). Single length-delimited UTF-8 line (full text from Go); NULL/0 if empty.
+ * Names use backend_* to match env imports alongside other backend bridges (not GPU API).
+ */
+void backend_log_error(const char *msg, int32_t msg_len);
+void backend_log_warning(const char *msg, int32_t msg_len);
+
 #ifdef __cplusplus
 }
 #endif

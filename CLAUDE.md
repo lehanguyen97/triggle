@@ -38,6 +38,7 @@ Branch `wasm-go`. Hexagonal board + sphere pegs, Phong shading + shadow map.
 ```
 engine/ (Go module triggle/engine only — no C++ here)
   backend/       — BackendHost + Backend + GPU interface; host_{cgo,wasm}.go, ptr_*.go
+  hostlog/       — `hostlog.LogError` / `LogWarning` → `backend_log_*` (CGO + wasmimport)
   gfx/           — descriptor builders, UploadMesh, constants
   shader/        — Phong + shadow GLSL
   render/        — Renderer, PhongRenderer, PipelineFamilyCache
@@ -48,8 +49,9 @@ game/
 backend/ (C++ / Emscripten)
   include/e/backend_api.h — C GPU API
   include/e/game_api.h    — game callback API (flattened event signature)
-  src/backend_api_impl.cpp — Sokol implementation
-  triggle.html              — WASM loader (bulk_copy bridge, WASI polyfills)
+  src/api_impl.cpp — Sokol implementation
+  triggle.html              — WASM loader (bulk_copy, `backend_log_*`, WASI polyfills)
+  src/log.cpp               — native stderr implementation of `backend_log_*`
   vendor/                   — sokol, cglm, cgltf (git submodules)
 ```
 
@@ -76,6 +78,7 @@ backend/ (C++ / Emscripten)
 - **Emscripten exports**: `EXPORTED_FUNCTIONS` lists `_backend_*` (and a few glTF helpers) plus `_main,_malloc,_free`; remaining C API via `EMSCRIPTEN_KEEPALIVE` on each function
 - **C++ `TempStrings`**: use **`std::deque`** for shader descriptor string storage — `std::vector` can reallocate and invalidate earlier `c_str()` pointers from multiple `add()` calls
 - **Band placement**: `CanPlace` requires ≥1 new edge; `PlaceBand` only adds `Edges` entries for edges that do not already exist
+- **Host logging**: `triggle/engine/hostlog` calls `backend_log_error` / `backend_log_warning` from `game_api.h` (one `(ptr, len)` UTF-8 string); native `log.cpp` → stderr; WASM `triggle.html` `env` → `console.error`/`warn`. Avoid `log`/`fmt` on hot paths for WASM size
 
 ## Build
 
@@ -100,12 +103,12 @@ Don't commit `build-wasm/`, `backend/vendor/`
 - Hardcoded uniform buffer sizes (must match Go struct layout)
 - Readback now exists via `bulk_copy_back`; still no generic typed ABI beyond explicit out-struct APIs
 - Error diagnostics are still coarse (`-1`/`0`); structured `BACKEND_ERR_*` codes are a future improvement
-- No error messages from engine (just -1)
+- Game reports readable failures via `LogError` + stderr/JS console; GPU backend API still returns opaque `-1`/`0`
 - Pegs are spheres, should be cylinders for realistic Triggle look
 
 ## Rules
 
 - Update docs on architectural changes or new learnings
 - All game logic in Go, C++ is thin wrapper
-- Same Go code both targets — platform split only in host_*/game_api_impl_* files
+- Same Go code both targets — platform split in `engine/backend/host_*`, `engine/hostlog/log_*`, `game/game_api_impl_*`
 - Ref `~/ws-local/graphics.gd/` for WASM patterns

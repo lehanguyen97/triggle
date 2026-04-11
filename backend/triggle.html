@@ -70,8 +70,20 @@
                     .then(mod => {
                         const backendMemory = Module.wasmMemory;
 
+                        const utf8FromGame = (ptr, len) => {
+                            if (!gameExports || len <= 0 || ptr === 0) return '';
+                            return new TextDecoder().decode(
+                                new Uint8Array(gameExports.memory.buffer, ptr, len));
+                        };
+
                         // Auto-forward all backend_* exports to game imports
                         const env = {
+                            backend_log_error: (msgPtr, msgLen) => {
+                                console.error(utf8FromGame(msgPtr, msgLen));
+                            },
+                            backend_log_warning: (msgPtr, msgLen) => {
+                                console.warn(utf8FromGame(msgPtr, msgLen));
+                            },
                             bulk_copy: (dst, src, len) => {
                                 new Uint8Array(backendMemory.buffer, dst, len)
                                     .set(new Uint8Array(gameExports.memory.buffer, src, len));

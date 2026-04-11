@@ -2,13 +2,20 @@
 
 package main
 
+import "triggle/engine/hostlog"
+
 var game *Game
 
 //go:wasmexport game_init
 func game_init() int32 {
 	var err error
 	game, err = newGame()
-	if err != nil || game == nil {
+	if err != nil {
+		hostlog.LogError(err.Error())
+		return -1
+	}
+	if game == nil {
+		hostlog.LogError("triggle: newGame returned nil without error")
 		return -1
 	}
 	return 0
@@ -17,6 +24,7 @@ func game_init() int32 {
 //go:wasmexport game_frame
 func game_frame(g int32, dt float64) int32 {
 	if g != 0 {
+		hostlog.LogError("triggle: invalid game handle (game_frame)")
 		return -1
 	}
 	return game.update(float32(dt))
@@ -30,6 +38,7 @@ func game_event(g int32,
 	scrollX float32, scrollY float32,
 	winW int32, winH int32) int32 {
 	if g != 0 {
+		hostlog.LogError("triggle: invalid game handle (game_event)")
 		return -1
 	}
 	return game.handleEvent(
@@ -67,6 +76,7 @@ func game_get_num_players() int32 {
 //go:wasmexport game_cleanup
 func game_cleanup(g int32) int32 {
 	if g != 0 {
+		hostlog.LogError("triggle: invalid game handle (game_cleanup)")
 		return -1
 	}
 	if game == nil {

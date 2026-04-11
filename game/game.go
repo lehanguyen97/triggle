@@ -7,6 +7,7 @@ import (
 	mgl "github.com/go-gl/mathgl/mgl32"
 
 	"triggle/engine/backend"
+	"triggle/engine/hostlog"
 	"triggle/engine/render"
 )
 
@@ -192,6 +193,7 @@ func newGame() (*Game, error) {
 		return abort(errors.New("triggle: preview mesh upload failed"))
 	}
 
+	hostlog.LogWarning("triggle: host logging ok (game initialized)")
 	return g, nil
 }
 
@@ -199,12 +201,14 @@ func (g *Game) update(dt float32) int32 {
 	// Rebuild band mesh if needed
 	if g.bandMeshDirty {
 		if err := g.rebuildBandMesh(); err != nil {
+			hostlog.LogError(err.Error())
 			return -1
 		}
 		g.bandMeshDirty = false
 	}
 	if g.triMeshDirty {
 		if err := g.rebuildTriMesh(); err != nil {
+			hostlog.LogError(err.Error())
 			return -1
 		}
 		g.triMeshDirty = false
@@ -215,11 +219,13 @@ func (g *Game) update(dt float32) int32 {
 		pc := PlayerColors[g.board.CurrentPlayer%len(PlayerColors)]
 		g.borderMesh = g.rnd.UploadMesh(boardBorderVertices(HexSize, pc), boardBorderIndices())
 		if g.borderMesh < 0 {
+			hostlog.LogError("triggle: border mesh upload failed")
 			return -1
 		}
 		g.borderPlayer = g.board.CurrentPlayer
 	}
 	if err := g.rebuildPreviewMesh(); err != nil {
+		hostlog.LogError(err.Error())
 		return -1
 	}
 

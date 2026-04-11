@@ -24,7 +24,7 @@ add_library(cgltf INTERFACE)
 target_include_directories(cgltf INTERFACE ${CMAKE_SOURCE_DIR}/backend/vendor/cgltf)
 
 # Main executable
-add_executable(triggle src/backend.cpp src/backend_gltf.cpp src/main.cpp src/backend_api_impl.cpp)
+add_executable(triggle src/backend.cpp src/gltf.cpp src/main.cpp src/api_impl.cpp src/log.cpp)
 
 if(EMSCRIPTEN)
     add_dependencies(triggle game)
@@ -55,9 +55,10 @@ if(OSX_MACOS)
     # Metal backend headers use Objective-C declarations; compile bridge sources as ObjC++.
     set_source_files_properties(
         src/backend.cpp
-        src/backend_gltf.cpp
-        src/backend_api_impl.cpp
+        src/gltf.cpp
+        src/api_impl.cpp
         src/main.cpp
+        src/log.cpp
         PROPERTIES LANGUAGE OBJCXX
     )
 endif()

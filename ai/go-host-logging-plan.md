@@ -24,32 +24,25 @@
 3. **Layered severity** — Match graphics.gd roughly: **error** vs **warning** vs optional **verbose** (gated by env or build flag later).
 4. **No heavy formatting in Go** for the default path — static messages or pre-built `[]byte`/string from small helpers; reserve `fmt` for editor/debug builds if ever needed.
 
-## Proposed C ABI (game host, not GPU backend)
+## C ABI (game host, not GPU backend) — **implemented**
 
-Extend **`game_api.h`** (or a small `game_log.h` included from it) with optional callbacks the **host implements** and the **game calls**:
+**`game_api.h`** — one length-delimited UTF-8 string per call (full line text built in Go; host only prints/routes it):
 
 ```c
-/* Optional: host registers these once after game_init, or weak symbols / no-op defaults. */
-void game_host_log_error(const char *msg, int32_t msg_len,
-                         const char *func_name, int32_t func_len,
-                         const char *file, int32_t file_len,
-                         int32_t line);
-void game_host_log_warning(const char *msg, int32_t msg_len, ...);
+void backend_log_error(const char *msg, int32_t msg_len);
+void backend_log_warning(const char *msg, int32_t msg_len);
 ```
 
-- Empty `func`/`file`/`line` allowed (send `NULL, 0` or `""`, `0`) for simple messages.
-- **CGO:** Go implementation calls C with `(*C.char)(unsafe.Pointer(unsafe.StringData(s)))` and `C.int32_t(len(s))` for non-empty strings; for empty use `NULL, 0`.
+- Empty message: `NULL, 0`.
+- **CGO:** `(*C.char)(unsafe.Pointer(unsafe.StringData(s)))` and `len(s)` when `len > 0`.
 
-**WASM (wasip1 + JS glue):** Same contract via `wasmimport`:
+**WASM:** `go:wasmimport env backend_log_error(msg_ptr, msg_len)` — `triggle.html` decodes UTF-8 from **game** memory → `console.error` / `console.warn`.
 
-- `go:wasmimport` `game_host_log_error(msg_ptr, msg_len, ...)` implemented in JS or in `triggle.html` / Emscripten preamble: read UTF-8 from **game** linear memory and `console.error` / append DOM log.
+**Native:** `log.cpp` — `fwrite` the span + newline to stderr (no extra formatting; severity is still error vs warning export if we need routing later; today both write to stderr).
 
-**Native `main.cpp`:** Provide `game_host_log_error` that `fwrite`/`fprintf` to stderr with a `triggle:` prefix, optionally include file/line when non-empty.
+## Go side (`engine/hostlog/log_{cgo,wasm}.go`)
 
-## Go side (`game/` or thin `game/log.go`)
-
-- **`LogError(msg string)`** / **`LogErrorAt(msg, funcName, file string, line int)`** — call host; `funcName`/`file`/`line` from `runtime.Caller` when desired (optional; costs a bit—use only on slow paths).
-- **`LogWarning`** — same pattern.
+- **`hostlog.LogError(msg string)`** / **`hostlog.LogWarning(msg string)`** — pass `msg` through; build prefixes like `triggle: …` in callers if needed.
 - **`LogThenFrameFail(msg string)`** (optional) — log to host then return non-zero from `update` so C++ can still print the numeric code if desired.
 - Keep **`errors.New`** for in-Go propagation; call **`LogError`** once at the boundary where you turn failure into a frame/init result.
 
@@ -61,15 +54,15 @@ void game_host_log_warning(const char *msg, int32_t msg_len, ...);
 ## `game_init` failure text
 
 - Option A: **`game_init` returns `-1`** and host calls **`game_get_last_error(ptr_out, len_out)`** that copies a NUL-terminated or `(ptr,len)` from a static Go buffer filled by `newGame` on failure.
-- Option B: **`game_host_log_error` invoked from Go** during failed `newGame` before return `-1` (graphics.gd-style: log then signal failure).
+- Option B: **`backend_log_error` invoked from Go** during failed `newGame` before return `-1` (graphics.gd-style: log then signal failure).
 
 Prefer **B** for one mechanism only; ensure host no-ops or prints on all platforms.
 
 ## Work items (ordered)
 
-1. **Declarations** — Add `game_host_log_*` to `game_api.h`; stub no-op implementations in `backend/` (or link-time weak defaults).
-2. **CGO** — `game/log_host_cgo.go`: call C shims with `StringData` + length.
-3. **WASM** — `game/log_host_wasm.go`: `go:wasmimport` + document loader stub in `triggle.html` / CMake copied assets.
+1. **Declarations** — Add `backend_log_*` to `game_api.h`; implementations in `backend/src/log.cpp`.
+2. **CGO** — `engine/hostlog/log_cgo.go`: call C with `StringData` + length (`-I../../backend/include`).
+3. **WASM** — `engine/hostlog/log_wasm.go`: `go:wasmimport` + `triggle.html` `env` stubs / CMake copied assets.
 4. **`main.cpp`** — Implement real stderr logging; optionally **`sapp_quit`** only after log (already partly there for frame errors).
 5. **Wire game** — `newGame` abort path + mesh rebuild failures: `LogError` + keep `errors.New` for return values where applicable.
 6. **Docs / CLAUDE** — Link this file; note “no `log`/`fmt` on hot path for wasm size.”

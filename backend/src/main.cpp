@@ -71,7 +71,7 @@ static void send_resize(void) {
 void on_init(void) {
     game = game_init();
     if (game != 0) {
-        fprintf(stderr, "game_init return error\n");
+        fprintf(stderr, "triggle: game_init failed (code %d); see host log above for detail\n", (int)game);
         return;
     }
     send_resize();
@@ -81,7 +81,7 @@ void on_frame(void) {
     double dt = sapp_frame_duration();
     int32_t fr = game_frame(game, dt);
     if (fr != 0) {
-        fprintf(stderr, "game_frame failed (%d)\n", (int)fr);
+        fprintf(stderr, "triggle: game_frame failed (code %d); see host log above for detail\n", (int)fr);
         sapp_quit();
     }
 }
