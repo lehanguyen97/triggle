@@ -10,6 +10,75 @@ package backend
 import "C"
 import "unsafe"
 
+// BackendHost (native) exposes the full HB+FT text pipeline in addition to the
+// shared GPU APIs. No DOM text-input overlay on native.
+type BackendHost struct {
+	Init    func() int32
+	Cleanup func(e int32) int32
+
+	Memory struct {
+		Malloc       func(size int32) Ptr
+		Free         func(p Ptr)
+		BulkCopy     func(dst Ptr, src unsafe.Pointer, length int32)
+		BulkCopyBack func(dst unsafe.Pointer, src Ptr, length int32)
+	}
+
+	Mesh struct {
+		Create  func(e int32, verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
+		Destroy func(m int32)
+		Info    func(m int32, out Ptr)
+	}
+
+	Gltf struct {
+		Load           func(e int32, path Ptr) int32
+		Unload         func(e int32, asset int32)
+		PrimitiveCount func(e int32, asset int32) int32
+		PrimitiveMesh  func(e int32, asset int32, prim int32) int32
+	}
+
+	Shader struct {
+		Create  func(e int32, desc Ptr, descLen int32) int32
+		Destroy func(e int32, shader int32)
+	}
+
+	Pipeline struct {
+		Create  func(e int32, desc Ptr, descLen int32) int32
+		Destroy func(e int32, pipeline int32)
+	}
+
+	Image struct {
+		CreateTarget  func(e int32, w, h, pixelFormat int32) int32
+		CreateTexture func(e int32, w, h, pixelFormat int32) int32
+		UpdateRGBA8   func(e int32, img, w, h int32, pixels Ptr, numBytes int32)
+		Destroy       func(e int32, img int32)
+	}
+
+	Sampler struct {
+		Create  func(e int32, minFilter, magFilter, wrap, compare int32) int32
+		Destroy func(e int32, sampler int32)
+	}
+
+	// Text: native superset — HarfBuzz shaping + FreeType glyph raster.
+	Text struct {
+		FontOpen         func(e int32, path Ptr, pathLen, ptSize int32) int32
+		FontClose        func(e int32, font int32)
+		FontGetMetrics   func(e int32, font int32, out Ptr) int32
+		MeasureUTF8      func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
+		ShapeUTF8        func(e int32, font int32, utf8 Ptr, utf8Len int32, outGlyphs Ptr, glyphCap int32, outShape Ptr) int32
+		RasterGlyphRGBA8 func(e int32, font int32, glyphID uint32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32
+	}
+
+	Pass struct {
+		Create func(e int32, color, depth int32) int32
+	}
+
+	Draw struct {
+		SubmitCommandBuffer func(e int32, data Ptr, length int32)
+	}
+}
+
+var Host BackendHost
+
 func init() {
 	Host.Init = func() int32 { return int32(C.backend_init()) }
 	Host.Cleanup = func(e int32) int32 { return int32(C.backend_cleanup(C.backend_t(e))) }
@@ -97,13 +166,13 @@ func init() {
 			unsafe.Pointer(utf8), C.int(utf8Len),
 			(*C.backend_text_measure_t)(unsafe.Pointer(outMeasure))))
 	}
-	HostTextNative.ShapeUTF8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outGlyphs Ptr, glyphCap int32, outShape Ptr) int32 {
+	Host.Text.ShapeUTF8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outGlyphs Ptr, glyphCap int32, outShape Ptr) int32 {
 		return int32(C.backend_text_shape_utf8(C.backend_t(e), C.text_font_t(font),
 			unsafe.Pointer(utf8), C.int(utf8Len),
 			(*C.backend_text_shaped_glyph_t)(unsafe.Pointer(outGlyphs)), C.int(glyphCap),
 			(*C.backend_text_shape_info_t)(unsafe.Pointer(outShape))))
 	}
-	HostTextNative.RasterGlyphRGBA = func(e int32, font int32, glyphID uint32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32 {
+	Host.Text.RasterGlyphRGBA8 = func(e int32, font int32, glyphID uint32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32 {
 		return int32(C.backend_text_raster_glyph_rgba8(C.backend_t(e), C.text_font_t(font), C.uint(glyphID),
 			unsafe.Pointer(outPixels), C.int(pixelCap), (*C.backend_text_glyph_bitmap_t)(unsafe.Pointer(outBitmap))))
 	}
@@ -114,4 +183,55 @@ func init() {
 	Host.Draw.SubmitCommandBuffer = func(e int32, data Ptr, length int32) {
 		C.backend_submit_command_buffer(C.backend_t(e), unsafe.Pointer(data), C.int(length))
 	}
+}
+
+// TextShapeUTF8 shapes a UTF-8 run into positioned glyphs (native-only; HarfBuzz).
+func (e Backend) TextShapeUTF8(font int32, utf8 string) ([]TextShapedGlyph, TextShapeInfo, bool) {
+	var textPtr Ptr
+	textLen := int32(len(utf8))
+	if textLen > 0 {
+		textPtr = Ptr(uintptr(unsafe.Pointer(unsafe.StringData(utf8))))
+	}
+
+	var info TextShapeInfo
+	if Host.Text.ShapeUTF8(e.handle, font, textPtr, textLen, 0, 0, Ptr(uintptr(unsafe.Pointer(&info)))) != 0 {
+		return nil, TextShapeInfo{}, false
+	}
+	if info.GlyphCount <= 0 {
+		return nil, info, true
+	}
+
+	glyphs := make([]TextShapedGlyph, info.GlyphCount)
+	if Host.Text.ShapeUTF8(e.handle, font, textPtr, textLen,
+		Ptr(uintptr(unsafe.Pointer(&glyphs[0]))), info.GlyphCount,
+		Ptr(uintptr(unsafe.Pointer(&info)))) != 0 {
+		return nil, TextShapeInfo{}, false
+	}
+	return glyphs, info, true
+}
+
+// TextRasterGlyphRGBA8 returns one glyph bitmap as packed RGBA8 (native-only; FreeType).
+func (e Backend) TextRasterGlyphRGBA8(font int32, glyphID uint32) ([]byte, TextGlyphBitmap, bool) {
+	var bitmap TextGlyphBitmap
+	if Host.Text.RasterGlyphRGBA8(e.handle, font, glyphID, 0, 0, Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
+		return nil, TextGlyphBitmap{}, false
+	}
+	if bitmap.WidthPx <= 0 || bitmap.HeightPx <= 0 {
+		return nil, bitmap, true
+	}
+	if bitmap.WidthPx > 4096 || bitmap.HeightPx > 4096 {
+		return nil, TextGlyphBitmap{}, false
+	}
+	pixelBytes64 := int64(bitmap.WidthPx) * int64(bitmap.HeightPx) * 4
+	if pixelBytes64 <= 0 || pixelBytes64 > 64*1024*1024 {
+		return nil, TextGlyphBitmap{}, false
+	}
+	pixelBytes := int32(pixelBytes64)
+	pixels := make([]byte, pixelBytes)
+	if Host.Text.RasterGlyphRGBA8(e.handle, font, glyphID,
+		Ptr(uintptr(unsafe.Pointer(&pixels[0]))), pixelBytes,
+		Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
+		return nil, TextGlyphBitmap{}, false
+	}
+	return pixels, bitmap, true
 }

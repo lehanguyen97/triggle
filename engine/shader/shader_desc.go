@@ -142,6 +142,6 @@ func BuildShaderDesc(d ShaderDesc) []byte {
 }
 
 // CreateShader builds and sends shader descriptor to the backend
-func CreateShader(e backend.BackendApis, d ShaderDesc) int32 {
+func CreateShader(e backend.Backend, d ShaderDesc) int32 {
 	return e.ShaderCreate(BuildShaderDesc(d))
 }

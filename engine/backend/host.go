@@ -1,114 +1,16 @@
+// Package backend bridges the Go engine to the C/C++ backend (native CGO)
+// or the Emscripten env imports (WASM).
+//
+// The `BackendHost` struct type is build-tagged (host_native.go / host_wasm.go)
+// because the two platforms expose different capabilities:
+//   - native: HarfBuzz shaping + FreeType per-glyph raster.
+//   - WASM:   browser whole-line raster + DOM text-input overlay.
+//
+// Cross-platform APIs live on both Host variants with identical field shapes,
+// so the wrapper methods below compile against either build.
 package backend
 
 import "unsafe"
-
-// BackendHost holds platform-specific function pointers, set in init() by host_{cgo,wasm}.go.
-// Mirrors backend_api.h. All pointer args are Ptr (uintptr on native, uint32 on WASM).
-var Host BackendHost
-
-// BackendApis is the thin bridge to the C/C++ backend (handle-bound; no explicit backend handle parameter).
-type BackendApis interface {
-	Cleanup() int32
-	Handle() int32
-
-	Malloc(size int32) Ptr
-	Free(p Ptr)
-	BulkCopy(dst Ptr, src unsafe.Pointer, length int32)
-	BulkCopyBack(dst unsafe.Pointer, src Ptr, length int32)
-
-	MeshCreate(verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
-	MeshDestroy(mesh int32)
-	MeshInfo(mesh int32) (MeshInfo, bool)
-
-	GltfLoad(path string) int32
-	GltfUnload(asset int32)
-	GltfPrimitiveCount(asset int32) int32
-	GltfPrimitiveMesh(asset, prim int32) int32
-
-	ShaderCreate(desc []byte) int32
-	ShaderDestroy(shader int32)
-	PipelineCreate(desc []byte) int32
-	PipelineDestroy(pipeline int32)
-
-	ImageCreateTarget(w, h, format int32) int32
-	ImageCreateTexture(w, h, format int32) int32
-	ImageUpdateRGBA8(img, w, h int32, pixels unsafe.Pointer, numBytes int32)
-	ImageDestroy(img int32)
-	SamplerCreate(minFilter, magFilter, wrap, compare int32) int32
-	SamplerDestroy(sampler int32)
-
-	TextFontOpen(path string, ptSize int32) int32
-	TextFontClose(font int32)
-	TextFontMetrics(font int32) (TextMetrics, bool)
-	TextMeasureUTF8(font int32, utf8 string) (TextMeasure, bool)
-
-	PassCreate(color, depth int32) int32
-	SubmitCommandBuffer(data Ptr, length int32)
-}
-
-type BackendHost struct {
-	Init    func() int32
-	Cleanup func(e int32) int32
-
-	Memory struct {
-		Malloc       func(size int32) Ptr
-		Free         func(p Ptr)
-		BulkCopy     func(dst Ptr, src unsafe.Pointer, length int32)
-		BulkCopyBack func(dst unsafe.Pointer, src Ptr, length int32)
-	}
-
-	Mesh struct {
-		Create  func(e int32, verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
-		Destroy func(m int32)
-		Info    func(m int32, out Ptr)
-	}
-
-	Gltf struct {
-		Load           func(e int32, path Ptr) int32
-		Unload         func(e int32, asset int32)
-		PrimitiveCount func(e int32, asset int32) int32
-		PrimitiveMesh  func(e int32, asset int32, prim int32) int32
-	}
-
-	Shader struct {
-		Create  func(e int32, desc Ptr, descLen int32) int32
-		Destroy func(e int32, shader int32)
-	}
-
-	Pipeline struct {
-		Create  func(e int32, desc Ptr, descLen int32) int32
-		Destroy func(e int32, pipeline int32)
-	}
-
-	Image struct {
-		CreateTarget  func(e int32, w, h, pixelFormat int32) int32
-		CreateTexture func(e int32, w, h, pixelFormat int32) int32
-		UpdateRGBA8   func(e int32, img, w, h int32, pixels Ptr, numBytes int32)
-		Destroy       func(e int32, img int32)
-	}
-
-	Sampler struct {
-		Create  func(e int32, minFilter, magFilter, wrap, compare int32) int32
-		Destroy func(e int32, sampler int32)
-	}
-
-	// Text holds the shared text APIs available on both native and WASM.
-	// Native-only glyph/shape APIs (ShapeUTF8, RasterGlyphRGBA) live in HostTextNative.
-	Text struct {
-		FontOpen       func(e int32, path Ptr, pathLen, ptSize int32) int32
-		FontClose      func(e int32, font int32)
-		FontGetMetrics func(e int32, font int32, out Ptr) int32
-		MeasureUTF8    func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
-	}
-
-	Pass struct {
-		Create func(e int32, color, depth int32) int32
-	}
-
-	Draw struct {
-		SubmitCommandBuffer func(e int32, data Ptr, length int32)
-	}
-}
 
 // Backend wraps a handle and delegates to Host.
 type Backend struct {

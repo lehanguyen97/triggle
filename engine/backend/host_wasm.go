@@ -4,6 +4,74 @@ package backend
 
 import "unsafe"
 
+// BackendHost (WASM) exposes the browser whole-line raster and (in a follow-up
+// commit) a DOM text-input overlay. No per-glyph shaping on this path.
+type BackendHost struct {
+	Init    func() int32
+	Cleanup func(e int32) int32
+
+	Memory struct {
+		Malloc       func(size int32) Ptr
+		Free         func(p Ptr)
+		BulkCopy     func(dst Ptr, src unsafe.Pointer, length int32)
+		BulkCopyBack func(dst unsafe.Pointer, src Ptr, length int32)
+	}
+
+	Mesh struct {
+		Create  func(e int32, verts Ptr, vertBytes int32, indices Ptr, idxBytes int32) int32
+		Destroy func(m int32)
+		Info    func(m int32, out Ptr)
+	}
+
+	Gltf struct {
+		Load           func(e int32, path Ptr) int32
+		Unload         func(e int32, asset int32)
+		PrimitiveCount func(e int32, asset int32) int32
+		PrimitiveMesh  func(e int32, asset int32, prim int32) int32
+	}
+
+	Shader struct {
+		Create  func(e int32, desc Ptr, descLen int32) int32
+		Destroy func(e int32, shader int32)
+	}
+
+	Pipeline struct {
+		Create  func(e int32, desc Ptr, descLen int32) int32
+		Destroy func(e int32, pipeline int32)
+	}
+
+	Image struct {
+		CreateTarget  func(e int32, w, h, pixelFormat int32) int32
+		CreateTexture func(e int32, w, h, pixelFormat int32) int32
+		UpdateRGBA8   func(e int32, img, w, h int32, pixels Ptr, numBytes int32)
+		Destroy       func(e int32, img int32)
+	}
+
+	Sampler struct {
+		Create  func(e int32, minFilter, magFilter, wrap, compare int32) int32
+		Destroy func(e int32, sampler int32)
+	}
+
+	// Text: browser subset — font lifecycle + whole-line raster (no per-glyph shaping).
+	Text struct {
+		FontOpen        func(e int32, path Ptr, pathLen, ptSize int32) int32
+		FontClose       func(e int32, font int32)
+		FontGetMetrics  func(e int32, font int32, out Ptr) int32
+		MeasureUTF8     func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
+		RasterLineRGBA8 func(e int32, font int32, utf8 Ptr, utf8Len int32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32
+	}
+
+	Pass struct {
+		Create func(e int32, color, depth int32) int32
+	}
+
+	Draw struct {
+		SubmitCommandBuffer func(e int32, data Ptr, length int32)
+	}
+}
+
+var Host BackendHost
+
 //go:wasmimport env backend_init
 func _backend_init() int32
 
@@ -160,6 +228,9 @@ func init() {
 	Host.Text.MeasureUTF8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32 {
 		return _backend_text_measure_utf8(e, font, uint32(utf8), utf8Len, uint32(outMeasure))
 	}
+	Host.Text.RasterLineRGBA8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32 {
+		return _backend_text_raster_utf8_rgba8(e, font, uint32(utf8), utf8Len, uint32(outPixels), pixelCap, uint32(outBitmap))
+	}
 
 	Host.Pass.Create = func(e int32, color, depth int32) int32 {
 		return _backend_pass_create(e, color, depth)
@@ -167,4 +238,37 @@ func init() {
 	Host.Draw.SubmitCommandBuffer = func(e int32, data Ptr, length int32) {
 		_backend_submit_command_buffer(e, uint32(data), length)
 	}
+}
+
+// TextRasterLineRGBA8 rasterizes a full UTF-8 run to RGBA8 using the browser
+// text backend (WASM-only; native has no run raster).
+func (e Backend) TextRasterLineRGBA8(font int32, utf8 string) ([]byte, TextRunBitmap, bool) {
+	var textPtr Ptr
+	textLen := int32(len(utf8))
+	if textLen > 0 {
+		textPtr = Ptr(uintptr(unsafe.Pointer(unsafe.StringData(utf8))))
+	}
+	var bitmap TextRunBitmap
+	if Host.Text.RasterLineRGBA8(e.handle, font, textPtr, textLen, 0, 0, Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
+		return nil, TextRunBitmap{}, false
+	}
+	if bitmap.WidthPx <= 0 || bitmap.HeightPx <= 0 {
+		return nil, bitmap, true
+	}
+	if bitmap.WidthPx > 4096 || bitmap.HeightPx > 4096 {
+		return nil, TextRunBitmap{}, false
+	}
+	pixelBytes64 := int64(bitmap.WidthPx) * int64(bitmap.HeightPx) * 4
+	if pixelBytes64 <= 0 || pixelBytes64 > 64*1024*1024 {
+		return nil, TextRunBitmap{}, false
+	}
+	pixelBytes := int32(pixelBytes64)
+	pixels := make([]byte, pixelBytes)
+	pixPtr := Ptr(uintptr(unsafe.Pointer(&pixels[0])))
+	if Host.Text.RasterLineRGBA8(e.handle, font, textPtr, textLen,
+		pixPtr, pixelBytes,
+		Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
+		return nil, TextRunBitmap{}, false
+	}
+	return pixels, bitmap, true
 }

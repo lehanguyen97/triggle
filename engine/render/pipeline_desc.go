@@ -48,12 +48,12 @@ func BuildPipelineDesc(d PipelineDesc) []byte {
 }
 
 // CreatePipeline builds and sends pipeline descriptor to the backend
-func CreatePipeline(e backend.BackendApis, d PipelineDesc) int32 {
+func CreatePipeline(e backend.Backend, d PipelineDesc) int32 {
 	return e.PipelineCreate(BuildPipelineDesc(d))
 }
 
 // UploadMesh uploads u16-indexed mesh data via Malloc+BulkCopy
-func UploadMesh(e backend.BackendApis, vertices []float32, indices []uint16) int32 {
+func UploadMesh(e backend.Backend, vertices []float32, indices []uint16) int32 {
 	vertBytes := int32(len(vertices) * 4)
 	idxBytes := int32(len(indices) * 2)
 

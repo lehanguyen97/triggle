@@ -39,7 +39,7 @@ func (srv *textServer) shapeLine(f *fontEntry, s string, pxSize int32) (*cachedL
 	if err != nil {
 		return nil, err
 	}
-	pixels, bitmap, ok := srv.b.TextRasterUTF8RGBA8Wasm(h, s)
+	pixels, bitmap, ok := srv.b.TextRasterLineRGBA8(h, s)
 	if !ok {
 		return nil, fmt.Errorf("text: run raster failed")
 	}
