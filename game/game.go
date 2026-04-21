@@ -7,8 +7,11 @@ import (
 	mgl "github.com/go-gl/mathgl/mgl32"
 
 	"triggle/engine/backend"
+	"triggle/engine/geom"
 	"triggle/engine/hostlog"
 	"triggle/engine/render"
+	"triggle/engine/text"
+	"triggle/engine/ui"
 )
 
 // Event types (match game_api.h)
@@ -99,6 +102,17 @@ type Game struct {
 	// glTF test asset (see gltf_path_*.go for path; load via render.LoadGltfPrimitive)
 	gltfAsset int32
 	gltfMesh  int32 // always valid; placeholder when glTF load fails or after unload in cleanup
+
+	// UI (immediate-mode overlay)
+	uiCtx         *ui.Context
+	uiFontRes     *text.Font
+	uiFace        *text.Face
+	uiFont        *ui.UIFont
+	uiInput       ui.InputFrame
+	uiBlocksMouse bool
+	dpiScale      float32
+
+	logBuf []string
 }
 
 func newGame() (*Game, error) {
@@ -162,6 +176,7 @@ func newGame() (*Game, error) {
 	g.camTarget = mgl.Vec3{0, 0, 0}
 	g.winW = 800
 	g.winH = 600
+	g.dpiScale = 1.0
 	g.updateCamera()
 
 	// Light — directional from upper right
@@ -193,8 +208,24 @@ func newGame() (*Game, error) {
 		return abort(errors.New("triggle: preview mesh upload failed"))
 	}
 
+	g.logBuf = make([]string, 0, 64)
+	if err := g.initUI(); err != nil {
+		hostlog.LogWarning("triggle: UI disabled: " + err.Error())
+	}
+	g.appendLogLine("log overlay ready")
+	g.appendLogLine("Tiếng Việt")
+	g.appendLogLine("Σω ≥ π, «naïve résumé»")
+
 	hostlog.LogWarning("triggle: host logging ok (game initialized)")
 	return g, nil
+}
+
+func (g *Game) appendLogLine(s string) {
+	g.logBuf = append(g.logBuf, s)
+	const maxKeep = 64
+	if len(g.logBuf) > maxKeep {
+		g.logBuf = g.logBuf[len(g.logBuf)-maxKeep:]
+	}
 }
 
 func (g *Game) update(dt float32) int32 {
@@ -230,6 +261,15 @@ func (g *Game) update(dt float32) int32 {
 	}
 
 	boardModel := mgl.Ident4()
+
+	g.rnd.SetScreenSize(g.winW, g.winH)
+
+	if g.uiCtx != nil {
+		g.uiCtx.Begin(g.uiInput, geom.Rect{W: float32(g.winW), H: float32(g.winH)}, dt)
+		g.buildUI()
+		g.uiCtx.End()
+		g.uiBlocksMouse = g.uiCtx.WantsMouse()
+	}
 
 	cam := render.CameraState{ViewProj: g.viewProj, CameraPos: g.cameraPos}
 	lit := render.LightState{Dir: g.lightDir, LightVP: g.lightVP}
@@ -282,7 +322,12 @@ func (g *Game) update(dt float32) int32 {
 	}
 	g.drawScorePegs()
 
+	if g.uiCtx != nil {
+		g.rnd.SubmitUI(g.uiCtx.Commands(), g.uiCtx.TextureBindings())
+	}
 	g.rnd.EndFrame()
+
+	g.uiInput = g.uiInput.NextFrame()
 
 	return 0
 }
@@ -346,6 +391,7 @@ func (g *Game) pegInLine(pegIdx int, line *Line) bool {
 }
 
 func (g *Game) cleanup() int32 {
+	g.closeUI()
 	var meshCode int32
 	if g.gltfAsset >= 0 {
 		render.UnloadGltfAsset(g.rnd.GPU(), g.gltfAsset)
@@ -402,30 +448,60 @@ func (g *Game) handleEvent(
 	case EvMouseDown:
 		g.mouseX = mouseX
 		g.mouseY = mouseY
+		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		var uibit uint8
+		switch keyOrBtn {
+		case MouseLeft:
+			uibit = ui.MouseLeft
+		case MouseRight:
+			uibit = ui.MouseRight
+		case MouseMiddle:
+			uibit = ui.MouseMiddle
+		}
+		g.uiInput.MouseDown |= uibit
+		g.uiInput.MousePressed |= uibit
+		block := g.uiBlocksMouse
 		if keyOrBtn == MouseMiddle || (keyOrBtn == MouseLeft && mods&ModShift != 0) {
-			g.middleDown = true
-			g.dragLastX = mouseX
-			g.dragLastY = mouseY
-			g.dragDist = 0
-		} else if keyOrBtn == MouseLeft {
+			if !block {
+				g.middleDown = true
+				g.dragLastX = mouseX
+				g.dragLastY = mouseY
+				g.dragDist = 0
+			}
+		} else if keyOrBtn == MouseLeft && !block {
 			g.leftDown = true
 			g.dragLastX = mouseX
 			g.dragLastY = mouseY
 			g.dragDist = 0
-			// Hit test for drag start
 			r := g.screenToRay(mouseX, mouseY)
 			origin := [3]float32{r.origin[0], r.origin[1], r.origin[2]}
 			dir := [3]float32{r.dir[0], r.dir[1], r.dir[2]}
 			g.dragStartPeg = g.board.PickPeg(origin, dir)
 		}
 	case EvMouseUp:
+		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		var uibit uint8
+		switch keyOrBtn {
+		case MouseLeft:
+			uibit = ui.MouseLeft
+		case MouseRight:
+			uibit = ui.MouseRight
+		case MouseMiddle:
+			uibit = ui.MouseMiddle
+		}
+		g.uiInput.MouseReleased |= uibit
+		g.uiInput.MouseDown &^= uibit
+
+		block := g.uiBlocksMouse
 		if keyOrBtn == MouseMiddle || (keyOrBtn == MouseLeft && g.middleDown) {
 			g.middleDown = false
 		} else if keyOrBtn == MouseLeft {
-			if g.leftDown && g.dragDist < 5.0 {
-				g.doClick(mouseX, mouseY)
-			} else if g.leftDown && g.dragStartPeg >= 0 && g.hoveredPeg >= 0 && g.dragStartPeg != g.hoveredPeg {
-				g.tryPlaceBand(g.dragStartPeg, g.hoveredPeg)
+			if !block {
+				if g.leftDown && g.dragDist < 5.0 {
+					g.doClick(mouseX, mouseY)
+				} else if g.leftDown && g.dragStartPeg >= 0 && g.hoveredPeg >= 0 && g.dragStartPeg != g.hoveredPeg {
+					g.tryPlaceBand(g.dragStartPeg, g.hoveredPeg)
+				}
 			}
 			g.leftDown = false
 			g.dragStartPeg = -1
@@ -433,8 +509,16 @@ func (g *Game) handleEvent(
 			g.previewLine = nil
 		}
 	case EvMouseMove:
+		dx := mouseX - g.mouseX
+		dy := mouseY - g.mouseY
+		g.uiInput.MouseDelta = geom.Vec2{dx, dy}
 		g.mouseX = mouseX
 		g.mouseY = mouseY
+		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		block := g.uiBlocksMouse
+		if block {
+			break
+		}
 		if g.middleDown {
 			dx := mouseX - g.dragLastX
 			dy := mouseY - g.dragLastY
@@ -483,6 +567,10 @@ func (g *Game) handleEvent(
 			}
 		}
 	case EvMouseScroll:
+		g.uiInput.ScrollDelta = g.uiInput.ScrollDelta.Add(geom.Vec2{scrollX, scrollY})
+		if g.uiBlocksMouse {
+			break
+		}
 		g.camDist -= scrollY * 0.5
 		if g.camDist < 2.0 {
 			g.camDist = 2.0
