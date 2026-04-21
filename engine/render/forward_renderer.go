@@ -6,6 +6,8 @@ import (
 	"triggle/engine/backend"
 	"triggle/engine/gfx"
 	"triggle/engine/shader"
+	"triggle/engine/ui"
+	uicmd "triggle/engine/ui/cmd"
 )
 
 // ForwardRenderer implements a forward render pipeline with shadow and main passes.
@@ -27,6 +29,11 @@ type ForwardRenderer struct {
 
 	programs map[RenderProgramID]MainRenderProgram
 
+	uiProgram *UIProgram
+	uiMesh    int32 // dynamic UI mesh; kept alive until after command buffer submit (see EmitUI).
+	uiCmds    []uicmd.UICmd
+	uiBindings []ui.TextureBinding
+
 	shadowShader int32
 	shadowFamily PipelineFamilyID
 
@@ -40,6 +47,9 @@ type ForwardRenderer struct {
 
 	cam   CameraState
 	light LightState
+
+	screenW int32
+	screenH int32
 
 	shadowDraws []SceneDrawable
 	mainDraws   []SceneDrawable
@@ -70,6 +80,12 @@ func NewForwardRenderer(gpu backend.Backend) *ForwardRenderer {
 
 	r.RegisterRenderProgram(RenderProgramPhong, NewPhongProgram())
 	r.RegisterRenderProgram(RenderProgramToon, NewToonProgram())
+
+	r.uiProgram = NewUIProgram()
+	if !r.uiProgram.Init(r.gpu, r.cache) {
+		r.uiProgram = nil
+	}
+	r.uiMesh = -1
 
 	r.shadowMap = gpu.ImageCreateTarget(1024, 1024, gfx.PixfmtDepth)
 	// Nearest filtering: WebGL warns that LINEAR + depth comparison is implementation-defined.
@@ -135,6 +151,20 @@ func (r *ForwardRenderer) BeginFrame(cam CameraState, lights LightState) {
 	r.light = lights
 	r.shadowDraws = r.shadowDraws[:0]
 	r.mainDraws = r.mainDraws[:0]
+	r.uiCmds = r.uiCmds[:0]
+	r.uiBindings = r.uiBindings[:0]
+}
+
+// SetScreenSize sets drawable dimensions for orthographic UI/text (call each frame before EndFrame).
+func (r *ForwardRenderer) SetScreenSize(w, h int32) {
+	r.screenW = w
+	r.screenH = h
+}
+
+// SubmitUI stores UI commands for this frame (call after ui.Context.End, before EndFrame).
+func (r *ForwardRenderer) SubmitUI(cmds []uicmd.UICmd, bindings []ui.TextureBinding) {
+	r.uiCmds = append(r.uiCmds[:0], cmds...)
+	r.uiBindings = append(r.uiBindings[:0], bindings...)
 }
 
 // SubmitShadow queues geometry for the shadow map pass (typically a subset, in light-space order).
@@ -181,6 +211,9 @@ func (r *ForwardRenderer) EndFrame() {
 		r.emitBindMesh(d.Mesh)
 		prog.DrawMain(r, d, meta.IndexCount)
 	}
+	if r.uiProgram != nil && len(r.uiCmds) > 0 {
+		r.uiProgram.EmitUI(r, r.uiCmds, r.uiBindings, r.screenW, r.screenH)
+	}
 	r.emitPassEnd()
 	r.emitCommit()
 	r.flushCommandBuffer()
@@ -214,11 +247,45 @@ func (r *ForwardRenderer) Release() {
 	for _, p := range r.programs {
 		p.Release(g)
 	}
+	r.programs = nil
+	if r.uiProgram != nil {
+		r.uiProgram.Release(g)
+		r.uiProgram = nil
+	}
+	if r.cache != nil {
+		r.cache.Release()
+		r.cache = nil
+	}
+	if r.shadowShader >= 0 {
+		g.ShaderDestroy(r.shadowShader)
+		r.shadowShader = -1
+	}
+	if r.shadowSampler >= 0 {
+		g.SamplerDestroy(r.shadowSampler)
+		r.shadowSampler = -1
+	}
+	if r.shadowMap >= 0 {
+		g.ImageDestroy(r.shadowMap)
+		r.shadowMap = -1
+	}
 	if r.cmdPtr != 0 {
 		g.Free(r.cmdPtr)
 		r.cmdPtr = 0
 		r.cmdPtrCap = 0
 	}
+	if r.uiMesh >= 0 {
+		r.DestroyMesh(r.uiMesh)
+		r.uiMesh = -1
+	}
+}
+
+func (r *ForwardRenderer) destroyUIMesh() {
+	if r == nil || r.uiMesh < 0 {
+		return
+	}
+	id := r.uiMesh
+	r.uiMesh = -1
+	r.DestroyMesh(id)
 }
 
 func (r *ForwardRenderer) emitPassBegin(pass int32, clearDepth float32) {
@@ -280,6 +347,15 @@ func (r *ForwardRenderer) emitDrawElements(base, count, instances int32) {
 
 func (r *ForwardRenderer) emitCommit() {
 	r.cmdBuf.emit(cmdCommit, func() {})
+}
+
+func (r *ForwardRenderer) emitApplyScissor(x, y, w, h int32) {
+	r.cmdBuf.emit(cmdApplyScissor, func() {
+		r.cmdBuf.appendI32(x)
+		r.cmdBuf.appendI32(y)
+		r.cmdBuf.appendI32(w)
+		r.cmdBuf.appendI32(h)
+	})
 }
 
 func (r *ForwardRenderer) flushCommandBuffer() {

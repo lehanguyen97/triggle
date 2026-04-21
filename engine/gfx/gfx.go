@@ -29,11 +29,12 @@ const (
 	SampleDepth = 1
 
 	SamplerFiltering    = 0
-	SamplerNonfiltering = 1
+	SamplerNonFiltering = 1
 	SamplerComparison   = 2
 
 	CmpNone      = 0
 	CmpLessEqual = 4
+	CmpAlways    = 8
 
 	CullNone  = 0
 	CullFront = 1
@@ -44,6 +45,7 @@ const (
 	IndexUint32 = 2
 
 	PixfmtDepth = 0
+	PixfmtRGBA8 = 1
 
 	FilterNearest = 0
 	FilterLinear  = 1
@@ -96,7 +98,8 @@ type PipelineDesc struct {
 	DepthWrite bool
 	Cull       int
 	IndexType  int
-	ColorCount int // 0 for depth-only, 1 for normal rendering
+	ColorCount int  // 0 for depth-only, 1 for normal rendering
+	Blend      bool // alpha blend for color attachment 0
 }
 
 // BuildShaderDesc serializes ShaderDesc to binary format
@@ -156,7 +159,11 @@ func BuildShaderDesc(d ShaderDesc) []byte {
 // BuildPipelineDesc serializes PipelineDesc to binary format
 func BuildPipelineDesc(d PipelineDesc) []byte {
 	buf := make([]byte, 0, 32)
-	appendI32 := func(v int32) { b := make([]byte, 4); binary.LittleEndian.PutUint32(b, uint32(v)); buf = append(buf, b...) }
+	appendI32 := func(v int32) {
+		b := make([]byte, 4)
+		binary.LittleEndian.PutUint32(b, uint32(v))
+		buf = append(buf, b...)
+	}
 
 	appendI32(d.Shader)
 	appendI32(d.Stride)
@@ -168,7 +175,11 @@ func BuildPipelineDesc(d PipelineDesc) []byte {
 	if d.DepthWrite {
 		dw = 1
 	}
-	buf = append(buf, byte(d.DepthCmp), dw, byte(d.Cull), byte(d.IndexType), byte(d.ColorCount))
+	bl := byte(0)
+	if d.Blend {
+		bl = 1
+	}
+	buf = append(buf, byte(d.DepthCmp), dw, byte(d.Cull), byte(d.IndexType), byte(d.ColorCount), bl)
 	return buf
 }
 

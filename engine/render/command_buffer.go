@@ -18,6 +18,7 @@ const (
 	cmdApplyUniforms    uint8 = 7
 	cmdDrawElements     uint8 = 8
 	cmdCommit           uint8 = 9
+	cmdApplyScissor     uint8 = 10
 )
 
 type commandBuffer struct {

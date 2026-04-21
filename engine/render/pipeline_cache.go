@@ -17,6 +17,7 @@ type PipelineFamilyDesc struct {
 	DepthWrite bool
 	Cull       int
 	ColorCount int
+	Blend      bool
 }
 
 // PipelineFamilyCache builds and stores two pipeline objects per family (IndexUint16 / IndexUint32).
@@ -41,6 +42,7 @@ func (c *PipelineFamilyCache) RegisterPipelineFamily(desc PipelineFamilyDesc) Pi
 		Cull:       desc.Cull,
 		IndexType:  gfx.IndexUint16,
 		ColorCount: desc.ColorCount,
+		Blend:      desc.Blend,
 	}
 	d32 := d16
 	d32.IndexType = gfx.IndexUint32
@@ -59,4 +61,20 @@ func (c *PipelineFamilyCache) Pipeline(family PipelineFamilyID, indexType int32)
 		return c.items[family].pip32
 	}
 	return c.items[family].pip16
+}
+
+// Release destroys every cached pipeline. The cache must not be used after this.
+func (c *PipelineFamilyCache) Release() {
+	if c == nil {
+		return
+	}
+	for _, it := range c.items {
+		if it.pip16 >= 0 {
+			c.gpu.PipelineDestroy(it.pip16)
+		}
+		if it.pip32 >= 0 {
+			c.gpu.PipelineDestroy(it.pip32)
+		}
+	}
+	c.items = nil
 }
