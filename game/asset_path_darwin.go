@@ -1,8 +1,13 @@
-//go:build !js && !wasip1
+//go:build darwin
 
 package main
 
 import "os"
+
+func defaultUIFontPath() string {
+	// Common macOS locations (first existing could be probed later).
+	return "/System/Library/Fonts/Supplemental/Arial.ttf"
+}
 
 func resolveGltfTestModelPath() string {
 	candidates := []string{

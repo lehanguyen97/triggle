@@ -7,10 +7,12 @@ set(GO_MOD_FILES
     ${CMAKE_CURRENT_SOURCE_DIR}/go.sum
 )
 get_filename_component(_GAME_DIR "${CMAKE_CURRENT_SOURCE_DIR}" ABSOLUTE)
-file(GLOB_RECURSE GO_SOURCES CONFIGURE_DEPENDS "${_GAME_DIR}/**/*.go")
+# Use "*.go" (not "**/*.go"): CMake's ** does not match files in the root of _GAME_DIR when
+# there are no subdirectories, so game/*.go was missing from DEPENDS and WASM never rebuilt.
+file(GLOB_RECURSE GO_SOURCES CONFIGURE_DEPENDS "${_GAME_DIR}/*.go")
 # triggle/engine module sources (not under game/); must be listed or CMake skips game.wasm rebuild
 get_filename_component(_ENGINE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../engine" ABSOLUTE)
-file(GLOB_RECURSE ENGINE_GO_SOURCES CONFIGURE_DEPENDS "${_ENGINE_DIR}/**/*.go")
+file(GLOB_RECURSE ENGINE_GO_SOURCES CONFIGURE_DEPENDS "${_ENGINE_DIR}/*.go")
 
 if(EMSCRIPTEN)
     set(GAME_WASM_DIR ${CMAKE_CURRENT_BINARY_DIR})
