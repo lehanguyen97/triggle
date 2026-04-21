@@ -27,7 +27,7 @@ file(GLOB BACKEND_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c
 if(NOT EMSCRIPTEN)
     # native builds keep text backend sources in the backend layer
 else()
-    list(REMOVE_ITEM BACKEND_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/text_backend.cpp")
+    list(REMOVE_ITEM BACKEND_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/text.cpp")
 endif()
 
 # Main executable

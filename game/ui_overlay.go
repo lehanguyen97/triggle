@@ -1,7 +1,7 @@
 package main
 
 import (
-	"triggle/engine/geom"
+	"triggle/engine/emath"
 	"triggle/engine/text"
 	"triggle/engine/ui"
 	"triggle/engine/ui/cmd"
@@ -9,31 +9,25 @@ import (
 )
 
 func (g *Game) initUI() error {
-	b := g.rnd.GPU()
-	font, err := text.OpenFontFile(b, defaultUIFontPath())
+	b := g.backend
+	font, err := text.OpenFont(b, defaultUIFontPath())
 	if err != nil {
 		return err
 	}
-	g.uiFontRes = font
-	face, err := font.NewFace(text.FaceOptions{PtSize: 16, DPIScale: g.dpiScale})
-	if err != nil {
-		g.uiFontRes = nil
-		return err
-	}
-	g.uiFace = face
-	uiFont := ui.NewUIFont(face)
-	g.uiFont = uiFont
+	g.uiFont = font
+
+	th := theme.DefaultTheme()
+	th.BodyPx = int32(float32(th.BodyPx) * g.dpiScale)
+	th.TitlePx = int32(float32(th.TitlePx) * g.dpiScale)
+
 	ctx, err := ui.NewContext(ui.ContextOptions{
-		Backend:  b,
-		Theme:    theme.DefaultTheme(),
-		UIFont:   uiFont,
-		DPIScale: g.dpiScale,
+		Backend: b,
+		Theme:   th,
+		Font:    font,
 	})
 	if err != nil {
-		uiFont.Close()
+		font.Close()
 		g.uiFont = nil
-		g.uiFace = nil
-		g.uiFontRes = nil
 		return err
 	}
 	g.uiCtx = ctx
@@ -45,7 +39,7 @@ func (g *Game) buildUI() {
 		return
 	}
 	if g.uiCtx.BeginWindow("Log",
-		geom.Rect{X: 10, Y: 10, W: 360, H: 220},
+		emath.Rect{X: 10, Y: 10, W: 360, H: 220},
 		ui.WindowNoResize|ui.WindowNoClose) {
 		g.uiCtx.LogView(g.logBuf, ui.LogViewOpt{
 			MaxVisible: 12,
@@ -64,13 +58,5 @@ func (g *Game) closeUI() {
 	if g.uiFont != nil {
 		g.uiFont.Close()
 		g.uiFont = nil
-	}
-	if g.uiFace != nil {
-		g.uiFace.Close()
-		g.uiFace = nil
-	}
-	if g.uiFontRes != nil {
-		g.uiFontRes.Close()
-		g.uiFontRes = nil
 	}
 }

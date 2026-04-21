@@ -2,8 +2,6 @@ package shader
 
 import (
 	_ "embed"
-
-	"triggle/engine/gfx"
 )
 
 //go:embed phong.vs.glsl
@@ -13,34 +11,34 @@ var phongVS string
 var phongFS string
 
 // PhongShaderDesc builds the phong shader descriptor.
-func PhongShaderDesc() gfx.ShaderDesc {
-	return gfx.ShaderDesc{
+func PhongShaderDesc() ShaderDesc {
+	return ShaderDesc{
 		VS:    phongVS,
 		FS:    phongFS,
 		Attrs: []string{"position", "normal", "color"},
-		UBs: []gfx.UniformBlock{
-			{Stage: gfx.StageVertex, Size: 192, Uniforms: []gfx.Uniform{
-				{Name: "model", Type: gfx.UniformMat4},
-				{Name: "viewProj", Type: gfx.UniformMat4},
-				{Name: "lightVP", Type: gfx.UniformMat4},
+		UBs: []UniformBlock{
+			{Stage: StageVertex, Size: 192, Uniforms: []Uniform{
+				{Name: "model", Type: UniformMat4},
+				{Name: "viewProj", Type: UniformMat4},
+				{Name: "lightVP", Type: UniformMat4},
 			}},
-			{Stage: gfx.StageFragment, Size: 36, Uniforms: []gfx.Uniform{
-				{Name: "lightDir", Type: gfx.UniformFloat3},
-				{Name: "ambient", Type: gfx.UniformFloat3},
-				{Name: "cameraPos", Type: gfx.UniformFloat3},
+			{Stage: StageFragment, Size: 36, Uniforms: []Uniform{
+				{Name: "lightDir", Type: UniformFloat3},
+				{Name: "ambient", Type: UniformFloat3},
+				{Name: "cameraPos", Type: UniformFloat3},
 			}},
 		},
 		Views: []struct{ Slot, Stage, ImageType, SampleType int }{
-			{0, gfx.StageFragment, gfx.Image2D, gfx.SampleDepth},
+			{0, StageFragment, Image2D, SampleDepth},
 		},
 		Samplers: []struct{ Slot, Stage, SamplerType int }{
-			{0, gfx.StageFragment, gfx.SamplerComparison},
+			{0, StageFragment, SamplerComparison},
 		},
 		Pairs: []struct {
 			Slot, Stage, ViewSlot, SamplerSlot int
 			Name                               string
 		}{
-			{0, gfx.StageFragment, 0, 0, "shadowMap"},
+			{0, StageFragment, 0, 0, "shadowMap"},
 		},
 	}
 }

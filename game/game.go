@@ -7,7 +7,7 @@ import (
 	mgl "github.com/go-gl/mathgl/mgl32"
 
 	"triggle/engine/backend"
-	"triggle/engine/geom"
+	emath "triggle/engine/emath"
 	"triggle/engine/hostlog"
 	"triggle/engine/render"
 	"triggle/engine/text"
@@ -49,7 +49,8 @@ var PlayerColors = [][4]float32{
 }
 
 type Game struct {
-	rnd *render.ForwardRenderer
+	backend  backend.Backend
+	renderer *render.ForwardRenderer
 
 	// Meshes
 	pegMesh      int32
@@ -105,9 +106,7 @@ type Game struct {
 
 	// UI (immediate-mode overlay)
 	uiCtx         *ui.Context
-	uiFontRes     *text.Font
-	uiFace        *text.Face
-	uiFont        *ui.UIFont
+	uiFont        *text.Font
 	uiInput       ui.InputFrame
 	uiBlocksMouse bool
 	dpiScale      float32
@@ -116,15 +115,15 @@ type Game struct {
 }
 
 func newGame() (*Game, error) {
-	g := &Game{}
-	eng := backend.NewBackend()
-	if eng.Handle() != 0 {
+	be := backend.NewBackend()
+	if be.Handle() != 0 {
 		return nil, errors.New("triggle: backend init failed")
 	}
-	g.rnd = render.NewForwardRenderer(eng)
+	rnd := render.NewForwardRenderer(be)
+	g := &Game{backend: be, renderer: rnd}
 	abort := func(err error) (*Game, error) {
-		g.rnd.Release()
-		_ = g.rnd.GPU().Cleanup()
+		rnd.Release()
+		_ = be.Cleanup()
 		return nil, err
 	}
 
@@ -136,35 +135,34 @@ func newGame() (*Game, error) {
 	// Meshes
 	pegVerts := pegMeshVertices()
 	pegIdx := pegMeshIndices()
-	gpu := g.rnd.GPU()
-	g.pegMesh = g.rnd.UploadMesh(pegVerts, pegIdx)
+	g.pegMesh = g.renderer.UploadMesh(pegVerts, pegIdx)
 	if g.pegMesh < 0 {
 		return abort(errors.New("triggle: peg mesh upload failed"))
 	}
 	// White sphere for score pegs — ambient drives the visible color
 	whitePegVerts := sphereVertices(float32(PegRadius), SphereSeg, SphereRing, 1.0, 1.0, 1.0, 1.0)
-	g.scorePegMesh = g.rnd.UploadMesh(whitePegVerts, pegIdx)
+	g.scorePegMesh = g.renderer.UploadMesh(whitePegVerts, pegIdx)
 	if g.scorePegMesh < 0 {
 		return abort(errors.New("triggle: score peg mesh upload failed"))
 	}
 	boardIdx := boardPlaneIndices()
-	g.boardMesh = g.rnd.UploadMesh(boardPlaneVertices(HexSize), boardIdx)
+	g.boardMesh = g.renderer.UploadMesh(boardPlaneVertices(HexSize), boardIdx)
 	if g.boardMesh < 0 {
 		return abort(errors.New("triggle: board mesh upload failed"))
 	}
 	pc0 := PlayerColors[g.board.CurrentPlayer%len(PlayerColors)]
-	g.borderMesh = g.rnd.UploadMesh(boardBorderVertices(HexSize, pc0), boardBorderIndices())
+	g.borderMesh = g.renderer.UploadMesh(boardBorderVertices(HexSize, pc0), boardBorderIndices())
 	if g.borderMesh < 0 {
 		return abort(errors.New("triggle: border mesh upload failed"))
 	}
 	g.borderPlayer = g.board.CurrentPlayer
 
 	dv, di := degeneratePhongMeshPlaceholder()
-	g.bandMesh = g.rnd.UploadMesh(dv, di)
+	g.bandMesh = g.renderer.UploadMesh(dv, di)
 	if g.bandMesh < 0 {
 		return abort(errors.New("triggle: band mesh placeholder upload failed"))
 	}
-	g.triMesh = g.rnd.UploadMesh(dv, di)
+	g.triMesh = g.renderer.UploadMesh(dv, di)
 	if g.triMesh < 0 {
 		return abort(errors.New("triggle: tri mesh placeholder upload failed"))
 	}
@@ -192,18 +190,18 @@ func newGame() (*Game, error) {
 	g.ambient = mgl.Vec3{0.2, 0.2, 0.2}
 
 	g.gltfAsset = -1
-	if asset, mesh, info, gltfOk := render.LoadGltfPrimitive(gpu, resolveGltfTestModelPath(), 0); gltfOk {
+	if asset, mesh, info, gltfOk := render.LoadGltfPrimitive(be, resolveGltfTestModelPath(), 0); gltfOk {
 		g.gltfAsset = asset
 		g.gltfMesh = mesh
-		g.rnd.RegisterMeshInfo(mesh, info.IndexCount, info.IndexType)
+		g.renderer.RegisterMeshInfo(mesh, info.IndexCount, info.IndexType)
 	} else {
-		g.gltfMesh = g.rnd.UploadMesh(dv, di)
+		g.gltfMesh = g.renderer.UploadMesh(dv, di)
 		if g.gltfMesh < 0 {
 			return abort(errors.New("triggle: glTF placeholder mesh upload failed"))
 		}
 	}
 
-	g.previewMesh = g.rnd.UploadMesh(dv, di)
+	g.previewMesh = g.renderer.UploadMesh(dv, di)
 	if g.previewMesh < 0 {
 		return abort(errors.New("triggle: preview mesh upload failed"))
 	}
@@ -246,9 +244,9 @@ func (g *Game) update(dt float32) int32 {
 	}
 	// Rebuild border mesh when player changes
 	if g.borderPlayer != g.board.CurrentPlayer {
-		g.rnd.DestroyMesh(g.borderMesh)
+		g.renderer.DestroyMesh(g.borderMesh)
 		pc := PlayerColors[g.board.CurrentPlayer%len(PlayerColors)]
-		g.borderMesh = g.rnd.UploadMesh(boardBorderVertices(HexSize, pc), boardBorderIndices())
+		g.borderMesh = g.renderer.UploadMesh(boardBorderVertices(HexSize, pc), boardBorderIndices())
 		if g.borderMesh < 0 {
 			hostlog.LogError("triggle: border mesh upload failed")
 			return -1
@@ -262,10 +260,10 @@ func (g *Game) update(dt float32) int32 {
 
 	boardModel := mgl.Ident4()
 
-	g.rnd.SetScreenSize(g.winW, g.winH)
+	g.renderer.SetScreenSize(g.winW, g.winH)
 
 	if g.uiCtx != nil {
-		g.uiCtx.Begin(g.uiInput, geom.Rect{W: float32(g.winW), H: float32(g.winH)}, dt)
+		g.uiCtx.Begin(g.uiInput, emath.Rect{W: g.winW, H: g.winH}, dt)
 		g.buildUI()
 		g.uiCtx.End()
 		g.uiBlocksMouse = g.uiCtx.WantsMouse()
@@ -273,37 +271,37 @@ func (g *Game) update(dt float32) int32 {
 
 	cam := render.CameraState{ViewProj: g.viewProj, CameraPos: g.cameraPos}
 	lit := render.LightState{Dir: g.lightDir, LightVP: g.lightVP}
-	g.rnd.BeginFrame(cam, lit)
+	g.renderer.BeginFrame(cam, lit)
 
 	// Shadow pass draws (order: pegs, then glTF)
 	for _, peg := range g.board.Pegs {
 		pegModel := mgl.Translate3D(peg.Pos[0], peg.Pos[1], peg.Pos[2])
-		g.rnd.SubmitShadow(render.SceneDrawable{
+		g.renderer.SubmitShadow(render.SceneDrawable{
 			Mesh: g.pegMesh, Model: pegModel, MaterialID: 0, Ambient: g.ambient,
 		})
 	}
 	gltfModel := mgl.Translate3D(4.0, 0.6, 0.0)
-	g.rnd.SubmitShadow(render.SceneDrawable{
+	g.renderer.SubmitShadow(render.SceneDrawable{
 		Mesh: g.gltfMesh, Model: gltfModel, MaterialID: 0, Ambient: g.ambient,
 	})
 
 	// Main pass draws (explicit scene order)
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.boardMesh, Model: boardModel, MaterialID: 0, Ambient: g.ambient,
 	})
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.gltfMesh, Model: gltfModel, Program: render.RenderProgramToon, MaterialID: 0, Ambient: mgl.Vec3{0.5, 0.7, 0.9},
 	})
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.borderMesh, Model: boardModel, MaterialID: 0, Ambient: g.ambient,
 	})
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.triMesh, Model: boardModel, MaterialID: 0, Ambient: mgl.Vec3{0.5, 0.5, 0.5},
 	})
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.bandMesh, Model: boardModel, MaterialID: 0, Ambient: mgl.Vec3{0.5, 0.5, 0.5},
 	})
-	g.rnd.SubmitMain(render.SceneDrawable{
+	g.renderer.SubmitMain(render.SceneDrawable{
 		Mesh: g.previewMesh, Model: boardModel, MaterialID: 0, Ambient: mgl.Vec3{0.6, 0.6, 0.3},
 	})
 	for i, peg := range g.board.Pegs {
@@ -316,16 +314,16 @@ func (g *Game) update(dt float32) int32 {
 		} else if i == g.hoveredPeg {
 			amb = mgl.Vec3{0.9, 0.9, 0.3}
 		}
-		g.rnd.SubmitMain(render.SceneDrawable{
+		g.renderer.SubmitMain(render.SceneDrawable{
 			Mesh: g.pegMesh, Model: pegModel, MaterialID: 0, Ambient: amb,
 		})
 	}
 	g.drawScorePegs()
 
 	if g.uiCtx != nil {
-		g.rnd.SubmitUI(g.uiCtx.Commands(), g.uiCtx.TextureBindings())
+		g.renderer.SubmitUI(g.uiCtx.Commands(), g.uiCtx.TextureBindings())
 	}
-	g.rnd.EndFrame()
+	g.renderer.EndFrame()
 
 	g.uiInput = g.uiInput.NextFrame()
 
@@ -374,7 +372,7 @@ func (g *Game) drawScorePegs() {
 			x := origin[0] + float32(c)*col[0] + float32(r)*row[0]
 			z := origin[2] + float32(c)*col[1] + float32(r)*row[1]
 			model := mgl.Translate3D(x, origin[1], z)
-			g.rnd.SubmitMain(render.SceneDrawable{
+			g.renderer.SubmitMain(render.SceneDrawable{
 				Mesh: g.scorePegMesh, Model: model, MaterialID: 0, Ambient: amb,
 			})
 		}
@@ -394,17 +392,17 @@ func (g *Game) cleanup() int32 {
 	g.closeUI()
 	var meshCode int32
 	if g.gltfAsset >= 0 {
-		render.UnloadGltfAsset(g.rnd.GPU(), g.gltfAsset)
-		g.rnd.ForgetMesh(g.gltfMesh)
+		g.backend.GltfUnload(g.gltfAsset)
+		g.renderer.ForgetMesh(g.gltfMesh)
 		g.gltfAsset = -1
 		dv, di := degeneratePhongMeshPlaceholder()
-		g.gltfMesh = g.rnd.UploadMesh(dv, di)
+		g.gltfMesh = g.renderer.UploadMesh(dv, di)
 		if g.gltfMesh < 0 {
 			meshCode = -1
 		}
 	}
-	g.rnd.Release()
-	code := g.rnd.GPU().Cleanup()
+	g.renderer.Release()
+	code := g.backend.Cleanup()
 	if meshCode != 0 {
 		return meshCode
 	}
@@ -448,7 +446,7 @@ func (g *Game) handleEvent(
 	case EvMouseDown:
 		g.mouseX = mouseX
 		g.mouseY = mouseY
-		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
 		var uibit uint8
 		switch keyOrBtn {
 		case MouseLeft:
@@ -479,7 +477,7 @@ func (g *Game) handleEvent(
 			g.dragStartPeg = g.board.PickPeg(origin, dir)
 		}
 	case EvMouseUp:
-		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
 		var uibit uint8
 		switch keyOrBtn {
 		case MouseLeft:
@@ -511,10 +509,10 @@ func (g *Game) handleEvent(
 	case EvMouseMove:
 		dx := mouseX - g.mouseX
 		dy := mouseY - g.mouseY
-		g.uiInput.MouseDelta = geom.Vec2{dx, dy}
+		g.uiInput.MouseDelta = emath.Vec2{dx, dy}
 		g.mouseX = mouseX
 		g.mouseY = mouseY
-		g.uiInput.MousePos = geom.Vec2{mouseX, mouseY}
+		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
 		block := g.uiBlocksMouse
 		if block {
 			break
@@ -567,7 +565,7 @@ func (g *Game) handleEvent(
 			}
 		}
 	case EvMouseScroll:
-		g.uiInput.ScrollDelta = g.uiInput.ScrollDelta.Add(geom.Vec2{scrollX, scrollY})
+		g.uiInput.ScrollDelta = g.uiInput.ScrollDelta.Add(emath.Vec2{scrollX, scrollY})
 		if g.uiBlocksMouse {
 			break
 		}
@@ -755,17 +753,17 @@ func (g *Game) rebuildTriMesh() error {
 		if !g.triHasGeometry {
 			return nil
 		}
-		g.rnd.DestroyMesh(g.triMesh)
+		g.renderer.DestroyMesh(g.triMesh)
 		dv, di := degeneratePhongMeshPlaceholder()
-		g.triMesh = g.rnd.UploadMesh(dv, di)
+		g.triMesh = g.renderer.UploadMesh(dv, di)
 		if g.triMesh < 0 {
 			return errors.New("triggle: tri mesh placeholder upload failed")
 		}
 		g.triHasGeometry = false
 		return nil
 	}
-	g.rnd.DestroyMesh(g.triMesh)
-	g.triMesh = g.rnd.UploadMesh(verts, indices)
+	g.renderer.DestroyMesh(g.triMesh)
+	g.triMesh = g.renderer.UploadMesh(verts, indices)
 	if g.triMesh < 0 {
 		return errors.New("triggle: tri mesh upload failed")
 	}
@@ -778,9 +776,9 @@ func (g *Game) rebuildBandMesh() error {
 		if !g.bandHasGeometry {
 			return nil
 		}
-		g.rnd.DestroyMesh(g.bandMesh)
+		g.renderer.DestroyMesh(g.bandMesh)
 		dv, di := degeneratePhongMeshPlaceholder()
-		g.bandMesh = g.rnd.UploadMesh(dv, di)
+		g.bandMesh = g.renderer.UploadMesh(dv, di)
 		if g.bandMesh < 0 {
 			return errors.New("triggle: band mesh placeholder upload failed")
 		}
@@ -792,17 +790,17 @@ func (g *Game) rebuildBandMesh() error {
 		if !g.bandHasGeometry {
 			return nil
 		}
-		g.rnd.DestroyMesh(g.bandMesh)
+		g.renderer.DestroyMesh(g.bandMesh)
 		dv, di := degeneratePhongMeshPlaceholder()
-		g.bandMesh = g.rnd.UploadMesh(dv, di)
+		g.bandMesh = g.renderer.UploadMesh(dv, di)
 		if g.bandMesh < 0 {
 			return errors.New("triggle: band mesh placeholder upload failed")
 		}
 		g.bandHasGeometry = false
 		return nil
 	}
-	g.rnd.DestroyMesh(g.bandMesh)
-	g.bandMesh = g.rnd.UploadMesh(verts, indices)
+	g.renderer.DestroyMesh(g.bandMesh)
+	g.bandMesh = g.renderer.UploadMesh(verts, indices)
 	if g.bandMesh < 0 {
 		return errors.New("triggle: band mesh upload failed")
 	}
@@ -815,9 +813,9 @@ func (g *Game) rebuildPreviewMesh() error {
 		if !g.previewHasQuads {
 			return nil
 		}
-		g.rnd.DestroyMesh(g.previewMesh)
+		g.renderer.DestroyMesh(g.previewMesh)
 		pv, pi := degeneratePhongMeshPlaceholder()
-		g.previewMesh = g.rnd.UploadMesh(pv, pi)
+		g.previewMesh = g.renderer.UploadMesh(pv, pi)
 		if g.previewMesh < 0 {
 			return errors.New("triggle: preview mesh upload failed")
 		}
@@ -831,17 +829,17 @@ func (g *Game) rebuildPreviewMesh() error {
 		if !g.previewHasQuads {
 			return nil
 		}
-		g.rnd.DestroyMesh(g.previewMesh)
+		g.renderer.DestroyMesh(g.previewMesh)
 		pv, pi := degeneratePhongMeshPlaceholder()
-		g.previewMesh = g.rnd.UploadMesh(pv, pi)
+		g.previewMesh = g.renderer.UploadMesh(pv, pi)
 		if g.previewMesh < 0 {
 			return errors.New("triggle: preview mesh upload failed")
 		}
 		g.previewHasQuads = false
 		return nil
 	}
-	g.rnd.DestroyMesh(g.previewMesh)
-	g.previewMesh = g.rnd.UploadMesh(verts, indices)
+	g.renderer.DestroyMesh(g.previewMesh)
+	g.previewMesh = g.renderer.UploadMesh(verts, indices)
 	if g.previewMesh < 0 {
 		return errors.New("triggle: preview mesh upload failed")
 	}

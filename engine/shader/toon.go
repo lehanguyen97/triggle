@@ -2,8 +2,6 @@ package shader
 
 import (
 	_ "embed"
-
-	"triggle/engine/gfx"
 )
 
 //go:embed toon.vs.glsl
@@ -13,19 +11,19 @@ var toonVS string
 var toonFS string
 
 // ToonShaderDesc builds the toon shader descriptor.
-func ToonShaderDesc() gfx.ShaderDesc {
-	return gfx.ShaderDesc{
+func ToonShaderDesc() ShaderDesc {
+	return ShaderDesc{
 		VS:    toonVS,
 		FS:    toonFS,
 		Attrs: []string{"position", "normal", "color"},
-		UBs: []gfx.UniformBlock{
-			{Stage: gfx.StageVertex, Size: 128, Uniforms: []gfx.Uniform{
-				{Name: "model", Type: gfx.UniformMat4},
-				{Name: "viewProj", Type: gfx.UniformMat4},
+		UBs: []UniformBlock{
+			{Stage: StageVertex, Size: 128, Uniforms: []Uniform{
+				{Name: "model", Type: UniformMat4},
+				{Name: "viewProj", Type: UniformMat4},
 			}},
-			{Stage: gfx.StageFragment, Size: 24, Uniforms: []gfx.Uniform{
-				{Name: "lightDir", Type: gfx.UniformFloat3},
-				{Name: "tint", Type: gfx.UniformFloat3},
+			{Stage: StageFragment, Size: 24, Uniforms: []Uniform{
+				{Name: "lightDir", Type: UniformFloat3},
+				{Name: "tint", Type: UniformFloat3},
 			}},
 		},
 	}

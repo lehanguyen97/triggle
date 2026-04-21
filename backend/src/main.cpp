@@ -87,8 +87,8 @@ void on_frame(void) {
 }
 
 void on_event(const sapp_event* sev) {
-    int32_t w = sev->window_width;
-    int32_t h = sev->window_height;
+    int32_t w = sev->framebuffer_width;
+    int32_t h = sev->framebuffer_height;
 
     switch (sev->type) {
         case SAPP_EVENTTYPE_KEY_DOWN:

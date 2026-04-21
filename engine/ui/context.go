@@ -8,8 +8,8 @@ import (
 	"unsafe"
 
 	"triggle/engine/backend"
-	"triggle/engine/geom"
-	"triggle/engine/gfx"
+	"triggle/engine/emath"
+	"triggle/engine/shader"
 	"triggle/engine/text"
 	"triggle/engine/ui/cmd"
 	"triggle/engine/ui/theme"
@@ -29,12 +29,13 @@ type TextureBinding struct {
 // bindWhite is the reserved bind id for the context-owned 1×1 white texture.
 const bindWhite uint32 = 1
 
-// ContextOptions configures a new UI context. All fields except DPIScale are required.
+// ContextOptions configures a new UI context. All fields are required.
+// Font is caller-owned (and shares a TextServer with any other Fonts on the
+// same backend); Context does not close it.
 type ContextOptions struct {
-	Backend  backend.Backend
-	Theme    *theme.Theme
-	UIFont   *UIFont
-	DPIScale float32 // default 1.0
+	Backend backend.Backend
+	Theme   *theme.Theme
+	Font    *text.Font
 }
 
 type whiteTex struct {
@@ -45,14 +46,13 @@ type whiteTex struct {
 type Context struct {
 	backend backend.Backend
 	theme   *theme.Theme
-	uiFont  *UIFont
-	dpi     float32
+	font    *text.Font
 
 	enc   cmd.Encoder
 	white whiteTex
 
 	in       InputFrame
-	viewport geom.Rect
+	viewport emath.Rect
 	dt       float32
 
 	idStack []string
@@ -63,7 +63,7 @@ type Context struct {
 	wantsKb    bool
 	wantsText  bool
 
-	layoutStack []geom.Rect
+	layoutStack []emath.Rect
 }
 
 // NewContext validates options and creates the shared white texture (bind 1).
@@ -71,11 +71,8 @@ func NewContext(opts ContextOptions) (*Context, error) {
 	if opts.Theme == nil {
 		return nil, fmt.Errorf("ui: ContextOptions.Theme required")
 	}
-	if opts.UIFont == nil {
-		return nil, fmt.Errorf("ui: ContextOptions.UIFont required")
-	}
-	if opts.DPIScale <= 0 {
-		opts.DPIScale = 1
+	if opts.Font == nil {
+		return nil, fmt.Errorf("ui: ContextOptions.Font required")
 	}
 	w, err := newWhiteTex(opts.Backend)
 	if err != nil {
@@ -84,19 +81,18 @@ func NewContext(opts ContextOptions) (*Context, error) {
 	return &Context{
 		backend: opts.Backend,
 		theme:   opts.Theme,
-		uiFont:  opts.UIFont,
-		dpi:     opts.DPIScale,
+		font:    opts.Font,
 		white:   w,
 		states:  make(map[WidgetID]any),
 	}, nil
 }
 
 func newWhiteTex(b backend.Backend) (whiteTex, error) {
-	img := b.ImageCreateTexture(1, 1, gfx.PixfmtRGBA8)
+	img := b.ImageCreateTexture(1, 1, shader.PixfmtRGBA8)
 	if img < 0 {
 		return whiteTex{}, fmt.Errorf("ui: white texture create failed")
 	}
-	smp := b.SamplerCreate(gfx.FilterNearest, gfx.FilterNearest, gfx.WrapClampToEdge, gfx.CmpNone)
+	smp := b.SamplerCreate(shader.FilterNearest, shader.FilterNearest, shader.WrapClampToEdge, shader.CmpNone)
 	if smp < 0 {
 		b.ImageDestroy(img)
 		return whiteTex{}, fmt.Errorf("ui: white sampler create failed")
@@ -144,7 +140,7 @@ func (c *Context) hashID() WidgetID {
 }
 
 // Begin starts a UI frame.
-func (c *Context) Begin(in InputFrame, viewport geom.Rect, dt float32) {
+func (c *Context) Begin(in InputFrame, viewport emath.Rect, dt float32) {
 	if c == nil {
 		return
 	}
@@ -167,15 +163,6 @@ func (c *Context) End() {
 	if c.activeID != 0 {
 		c.wantsMouse = true
 	}
-}
-
-// DrawText draws one cached line; (x, y) is the top-left of the line box.
-func (c *Context) DrawText(cacheKey, content string, x, y float32, color cmd.Color) {
-	if c == nil || c.uiFont == nil || content == "" {
-		return
-	}
-	tc := text.Color{R: color.R, G: color.G, B: color.B, A: color.A}
-	c.uiFont.drawLine(&c.enc, cacheKey, content, x, y, tc)
 }
 
 // Commands returns the UI command stream for SubmitUI.
@@ -206,8 +193,8 @@ func (c *Context) Input() InputFrame { return c.in }
 // Theme returns the active theme.
 func (c *Context) Theme() *theme.Theme { return c.theme }
 
-// UIFont returns the font cache (widgets use DrawText; custom views may query metrics).
-func (c *Context) UIFont() *UIFont { return c.uiFont }
+// Font returns the active font (widgets draw directly on it; custom views may query metrics).
+func (c *Context) Font() *text.Font { return c.font }
 
 // Encoder returns the raw command encoder (for widgets and BeginView).
 func (c *Context) Encoder() *cmd.Encoder { return &c.enc }
@@ -251,7 +238,7 @@ func (c *Context) WantsKeyboard() bool { return c != nil && c.wantsKb }
 func (c *Context) WantsTextInput() bool { return c != nil && c.wantsText }
 
 // Close releases CPU-side context state and the shared white texture.
-// UIFont and Face are owned by the caller and must be closed separately.
+// Font is owned by the caller and must be closed separately.
 func (c *Context) Close() {
 	if c == nil {
 		return
@@ -269,9 +256,9 @@ func (c *Context) Close() {
 }
 
 // ContentRect is the inner layout rectangle of the current container (or full viewport).
-func (c *Context) ContentRect() geom.Rect {
+func (c *Context) ContentRect() emath.Rect {
 	if c == nil {
-		return geom.Rect{}
+		return emath.Rect{}
 	}
 	if len(c.layoutStack) == 0 {
 		return c.viewport
@@ -279,7 +266,7 @@ func (c *Context) ContentRect() geom.Rect {
 	return c.layoutStack[len(c.layoutStack)-1]
 }
 
-func (c *Context) pushLayout(r geom.Rect) {
+func (c *Context) pushLayout(r emath.Rect) {
 	if c == nil {
 		return
 	}

@@ -6,8 +6,8 @@ import "unsafe"
 // Mirrors backend_api.h. All pointer args are Ptr (uintptr on native, uint32 on WASM).
 var Host BackendHost
 
-// GPU is the thin bridge to the C/C++ backend (handle-bound; no explicit backend handle parameter).
-type GPU interface {
+// BackendApis is the thin bridge to the C/C++ backend (handle-bound; no explicit backend handle parameter).
+type BackendApis interface {
 	Cleanup() int32
 	Handle() int32
 
@@ -37,7 +37,7 @@ type GPU interface {
 	SamplerCreate(minFilter, magFilter, wrap, compare int32) int32
 	SamplerDestroy(sampler int32)
 
-	TextFontOpen(path string, ptSize float32) int32
+	TextFontOpen(path string, ptSize int32) int32
 	TextFontClose(font int32)
 	TextFontMetrics(font int32) (TextMetrics, bool)
 	TextMeasureUTF8(font int32, utf8 string) (TextMeasure, bool)
@@ -95,7 +95,7 @@ type BackendHost struct {
 	// Text holds the shared text APIs available on both native and WASM.
 	// Native-only glyph/shape APIs (ShapeUTF8, RasterGlyphRGBA) live in HostTextNative.
 	Text struct {
-		FontOpen       func(e int32, path Ptr, pathLen int32, ptSize float32) int32
+		FontOpen       func(e int32, path Ptr, pathLen, ptSize int32) int32
 		FontClose      func(e int32, font int32)
 		FontGetMetrics func(e int32, font int32, out Ptr) int32
 		MeasureUTF8    func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
@@ -261,7 +261,7 @@ func (e Backend) SamplerCreate(minFilter, magFilter, wrap, compare int32) int32 
 }
 func (e Backend) SamplerDestroy(sampler int32) { Host.Sampler.Destroy(e.handle, sampler) }
 
-func (e Backend) TextFontOpen(path string, ptSize float32) int32 {
+func (e Backend) TextFontOpen(path string, ptSize int32) int32 {
 	var pathPtr Ptr
 	pathLen := int32(len(path))
 	if pathLen > 0 {

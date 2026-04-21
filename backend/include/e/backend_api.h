@@ -179,7 +179,7 @@ sampler_t backend_sampler_create(backend_t e,
 void backend_sampler_destroy(backend_t e, sampler_t sampler);
 
 /* Text — shared (native + WASM): font lifecycle, metrics, line measurement. */
-text_font_t backend_text_font_open(backend_t e, const char* path, int32_t path_len, float pt_size);
+text_font_t backend_text_font_open(backend_t e, const char* path, int32_t path_len, int32_t pt_size);
 void backend_text_font_close(backend_t e, text_font_t font);
 int32_t backend_text_font_get_metrics(backend_t e, text_font_t font, backend_text_metrics_t* out_metrics);
 int32_t backend_text_measure_utf8(backend_t backend,

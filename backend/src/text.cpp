@@ -55,7 +55,7 @@ static void destroy_text_font(BackendTextFont* font) {
 
 extern "C" {
 
-text_font_t backend_text_font_open(backend_t e, const char* path, int32_t path_len, float pt_size) {
+text_font_t backend_text_font_open(backend_t e, const char* path, int32_t path_len, int32_t pt_size) {
     if (e != 0 || !path || path_len <= 0 || pt_size <= 0.0f) {
         return -1;
     }

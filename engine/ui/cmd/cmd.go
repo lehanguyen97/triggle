@@ -1,7 +1,7 @@
 package cmd
 
 import (
-	"triggle/engine/geom"
+	"triggle/engine/emath"
 	"triggle/engine/text"
 )
 
@@ -34,8 +34,8 @@ type UICmd struct {
 	Kind   UICmdKind
 	BindID uint32
 
-	Rect  geom.Rect
-	UV    geom.UVRect
+	Rect  emath.Rect
+	UV    emath.UVRect
 	Color Color
 }
 
@@ -49,8 +49,8 @@ type Binding struct {
 // Encoder accumulates UI commands and dynamic texture bind ids (bind 1 = white, reserved elsewhere).
 type Encoder struct {
 	cmds      []UICmd
-	clipStack []geom.Rect
-	viewport  geom.Rect
+	clipStack []emath.Rect
+	viewport  emath.Rect
 
 	nextBind uint32
 	texMap   map[texKey]uint32
@@ -63,7 +63,7 @@ type texKey struct {
 }
 
 // Reset clears the encoder for a new frame (dynamic binds start at id 2).
-func (e *Encoder) Reset(viewport geom.Rect) {
+func (e *Encoder) Reset(viewport emath.Rect) {
 	if e == nil {
 		return
 	}
@@ -76,7 +76,7 @@ func (e *Encoder) Reset(viewport geom.Rect) {
 }
 
 // Quad draws a textured quad.
-func (e *Encoder) Quad(bindID uint32, dst geom.Rect, uv geom.UVRect, color Color) {
+func (e *Encoder) Quad(bindID uint32, dst emath.Rect, uv emath.UVRect, color Color) {
 	if e == nil {
 		return
 	}
@@ -90,12 +90,12 @@ func (e *Encoder) Quad(bindID uint32, dst geom.Rect, uv geom.UVRect, color Color
 }
 
 // QuadSolid draws a solid color quad using bind id 1 (1×1 white texture, UV 0..1).
-func (e *Encoder) QuadSolid(dst geom.Rect, color Color) {
-	e.Quad(1, dst, geom.UVRect{U0: 0, V0: 0, U1: 1, V1: 1}, color)
+func (e *Encoder) QuadSolid(dst emath.Rect, color Color) {
+	e.Quad(1, dst, emath.UVRect{U0: 0, V0: 0, U1: 1, V1: 1}, color)
 }
 
 // AddTexturedQuad implements text.QuadSink: allocates a bind id per (image, sampler) each frame.
-func (e *Encoder) AddTexturedQuad(image, sampler int32, dst geom.Rect, uv geom.UVRect, color text.Color) {
+func (e *Encoder) AddTexturedQuad(image, sampler int32, dst emath.Rect, uv emath.UVRect, color text.Color) {
 	if e == nil || image < 0 || sampler < 0 {
 		return
 	}
@@ -126,7 +126,7 @@ func (e *Encoder) Bindings() []Binding {
 }
 
 // PushClip intersects with the current clip and records a push command.
-func (e *Encoder) PushClip(r geom.Rect) {
+func (e *Encoder) PushClip(r emath.Rect) {
 	if e == nil {
 		return
 	}

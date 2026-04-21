@@ -1,5 +1,4 @@
-// Package geom holds shared 2D types (no GPU, no platform code).
-package geom
+package emath
 
 import "github.com/go-gl/mathgl/mgl32"
 
@@ -8,7 +7,7 @@ type Vec2 = mgl32.Vec2
 
 // Rect is an axis-aligned rectangle in pixel space (top-left origin).
 type Rect struct {
-	X, Y, W, H float32
+	X, Y, W, H int32
 }
 
 // Intersect returns the intersection of a and b, or zero area if disjoint.
@@ -26,7 +25,7 @@ func (a Rect) Intersect(b Rect) Rect {
 }
 
 // Contains reports whether point (x,y) lies inside r (inclusive top/left, exclusive bottom/right).
-func (r Rect) Contains(x, y float32) bool {
+func (r Rect) Contains(x, y int32) bool {
 	return x >= r.X && y >= r.Y && x < r.X+r.W && y < r.Y+r.H
 }
 
@@ -35,14 +34,14 @@ type UVRect struct {
 	U0, V0, U1, V1 float32
 }
 
-func min(a, b float32) float32 {
+func min(a, b int32) int32 {
 	if a < b {
 		return a
 	}
 	return b
 }
 
-func max(a, b float32) float32 {
+func max(a, b int32) int32 {
 	if a > b {
 		return a
 	}

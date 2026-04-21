@@ -2,8 +2,6 @@ package shader
 
 import (
 	_ "embed"
-
-	"triggle/engine/gfx"
 )
 
 //go:embed ui.vs.glsl
@@ -13,27 +11,27 @@ var uiVS string
 var uiFS string
 
 // UIShaderDesc is the single UI/text textured-quad shader (straight alpha).
-func UIShaderDesc() gfx.ShaderDesc {
-	return gfx.ShaderDesc{
+func UIShaderDesc() ShaderDesc {
+	return ShaderDesc{
 		VS:    uiVS,
 		FS:    uiFS,
 		Attrs: []string{"a_pos", "a_uv", "a_color"},
-		UBs: []gfx.UniformBlock{
-			{Stage: gfx.StageVertex, Size: 64, Uniforms: []gfx.Uniform{
-				{Name: "u_mvp", Type: gfx.UniformMat4},
+		UBs: []UniformBlock{
+			{Stage: StageVertex, Size: 64, Uniforms: []Uniform{
+				{Name: "u_mvp", Type: UniformMat4},
 			}},
 		},
 		Views: []struct{ Slot, Stage, ImageType, SampleType int }{
-			{0, gfx.StageFragment, gfx.Image2D, gfx.SampleFloat},
+			{0, StageFragment, Image2D, SampleFloat},
 		},
 		Samplers: []struct{ Slot, Stage, SamplerType int }{
-			{0, gfx.StageFragment, gfx.SamplerFiltering},
+			{0, StageFragment, SamplerFiltering},
 		},
 		Pairs: []struct {
 			Slot, Stage, ViewSlot, SamplerSlot int
 			Name                               string
 		}{
-			{0, gfx.StageFragment, 0, 0, "u_tex"},
+			{0, StageFragment, 0, 0, "u_tex"},
 		},
 	}
 }

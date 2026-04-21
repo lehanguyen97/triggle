@@ -1,12 +1,17 @@
 package ui
 
-import "triggle/engine/ui/theme"
+import (
+	"triggle/engine/text"
+	"triggle/engine/ui/theme"
+)
 
 // Label draws a single-line label at the top-left of the current content rect.
 func (c *Context) Label(s string) {
-	if c == nil || c.uiFont == nil || s == "" {
+	if c == nil || c.font == nil || s == "" {
 		return
 	}
 	r := c.ContentRect()
-	c.DrawText("", s, r.X, r.Y, c.theme.Colors[theme.ColorText])
+	col := c.theme.Colors[theme.ColorText]
+	c.font.Draw(&c.enc, s, r.X, r.Y, c.theme.BodyPx,
+		text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
 }

@@ -2,13 +2,15 @@
 package theme
 
 import (
-	"triggle/engine/geom"
+	"triggle/engine/emath"
 	"triggle/engine/ui/cmd"
 )
 
-// Theme holds default style tokens for immediate-mode UI.
+// Theme holds default style tokens for immediate-mode UI. Pixel sizes are in
+// framebuffer pixels (DPI already applied by whoever builds the Theme).
 type Theme struct {
-	FontSize      float32
+	BodyPx        int32
+	TitlePx       int32
 	Padding       Insets
 	Spacing       int32
 	Indent        int32
@@ -70,7 +72,7 @@ const (
 
 // StyleBox draws a widget background into the UI command stream.
 type StyleBox interface {
-	Draw(enc *cmd.Encoder, rect geom.Rect)
+	Draw(enc *cmd.Encoder, rect emath.Rect)
 	ContentMargin() Insets
 }
 
@@ -85,7 +87,7 @@ type StyleBoxFlat struct {
 
 func (s StyleBoxFlat) ContentMargin() Insets { return s.Padding }
 
-func (s StyleBoxFlat) Draw(enc *cmd.Encoder, rect geom.Rect) {
+func (s StyleBoxFlat) Draw(enc *cmd.Encoder, rect emath.Rect) {
 	if enc == nil {
 		return
 	}
@@ -95,7 +97,8 @@ func (s StyleBoxFlat) Draw(enc *cmd.Encoder, rect geom.Rect) {
 // DefaultTheme builds a minimal baseline UI theme.
 func DefaultTheme() *Theme {
 	t := &Theme{
-		FontSize:      16,
+		BodyPx:        16,
+		TitlePx:       16,
 		Padding:       Insets{Top: 8, Right: 8, Bottom: 8, Left: 8},
 		Spacing:       6,
 		TitleHeight:   24,

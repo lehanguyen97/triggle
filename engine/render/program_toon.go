@@ -2,7 +2,6 @@ package render
 
 import (
 	"triggle/engine/backend"
-	"triggle/engine/gfx"
 	"triggle/engine/shader"
 )
 
@@ -14,17 +13,17 @@ type ToonProgram struct {
 func NewToonProgram() *ToonProgram { return &ToonProgram{} }
 
 func (p *ToonProgram) Init(g backend.Backend, cache *PipelineFamilyCache) bool {
-	p.shader = gfx.CreateShader(g, p.shaderDesc())
+	p.shader = shader.CreateShader(g, p.shaderDesc())
 	if p.shader < 0 {
 		return false
 	}
 	p.mainFamily = cache.RegisterPipelineFamily(PipelineFamilyDesc{
 		Shader:     p.shader,
-		Stride:     int32(gfx.PhongVertexStride),
-		Attrs:      []int{gfx.AttrFloat3, gfx.AttrFloat3, gfx.AttrFloat4},
-		DepthCmp:   gfx.CmpLessEqual,
+		Stride:     int32(shader.PhongVertexStride),
+		Attrs:      []int{shader.AttrFloat3, shader.AttrFloat3, shader.AttrFloat4},
+		DepthCmp:   shader.CmpLessEqual,
 		DepthWrite: true,
-		Cull:       gfx.CullBack,
+		Cull:       shader.CullBack,
 		ColorCount: 1,
 	})
 	return true
@@ -61,6 +60,6 @@ func (p *ToonProgram) Release(g backend.Backend) {
 	}
 }
 
-func (p *ToonProgram) shaderDesc() gfx.ShaderDesc {
+func (p *ToonProgram) shaderDesc() shader.ShaderDesc {
 	return shader.ToonShaderDesc()
 }

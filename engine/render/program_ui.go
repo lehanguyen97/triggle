@@ -2,7 +2,6 @@ package render
 
 import (
 	"triggle/engine/backend"
-	"triggle/engine/gfx"
 	"triggle/engine/shader"
 )
 
@@ -17,17 +16,17 @@ type UIProgram struct {
 func NewUIProgram() *UIProgram { return &UIProgram{} }
 
 func (p *UIProgram) Init(g backend.Backend, cache *PipelineFamilyCache) bool {
-	p.shader = gfx.CreateShader(g, shader.UIShaderDesc())
+	p.shader = shader.CreateShader(g, shader.UIShaderDesc())
 	if p.shader < 0 {
 		return false
 	}
 	p.mainFamily = cache.RegisterPipelineFamily(PipelineFamilyDesc{
 		Shader:     p.shader,
 		Stride:     UIVertexStride,
-		Attrs:      []int{gfx.AttrFloat2, gfx.AttrFloat2, gfx.AttrFloat4},
-		DepthCmp:   gfx.CmpAlways,
+		Attrs:      []int{shader.AttrFloat2, shader.AttrFloat2, shader.AttrFloat4},
+		DepthCmp:   shader.CmpAlways,
 		DepthWrite: false,
-		Cull:       gfx.CullNone,
+		Cull:       shader.CullNone,
 		ColorCount: 1,
 		Blend:      true,
 	})

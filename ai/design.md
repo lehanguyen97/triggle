@@ -31,6 +31,7 @@ See `ai/reference-graphics-gd.md` for graphics.gd WASM patterns.
   - C++ decodes command stream and maps to Sokol calls.
   - Per-draw immediate bridge functions were removed from runtime API.
 - Mesh metadata stays cached in renderer (`index_count`, `index_type`) to avoid draw-time metadata boundary calls.
+- **Text / UI overlay**: GPU RGBA atlas (`backend_image_create_texture`, `backend_image_update_rgba8`), `TextProgram` (alpha blend, depth always), queued after main geometry in the default pass. The C contract has three tiers: (1) shared `backend_text_*` layout primitives (`font_open/close`, `font_get_metrics`, `measure_utf8`) on both native and WASM; (2) native-only `shape_utf8` + `raster_glyph_rgba8` (FreeType + HarfBuzz in `backend/src/text_backend.cpp`); (3) browser-only `backend_text_raster_utf8_rgba8` (whole-line raster in `backend/triggle.html`, not declared as a native function). `engine/text.Surface` is the current shared seam: `LogOverlay` consumes `Surface` only — never `Font` directly. Native `Surface` impl is glyph-atlas + HarfBuzz shaping; WASM `Surface` impl is run-line atlas over canvas raster. Both close their image, sampler, and font on `Close()`. Renderer cleanup is symmetric: every `*_create` has a matching `*_destroy` and they're invoked at shutdown. The canonical UI direction (rename `engine/text` → `engine/uitext`, add `engine/ui`, port `LogOverlay` to `ui.Window`+`ui.LogView`, carry clipping via `cmdApplyScissor` in the shared command buffer) is in `ai/ui-design.md`.
 
 ### Command stream invariants
 
@@ -75,7 +76,8 @@ Board game (2-4 players). **Hexagonal board** with pegs on a triangular lattice.
 - [x] Band placement rules (adjacency, ≥1 new edge), triangle claiming, scores, turn advance
 - [ ] Cylinder peg mesh (replace sphere)
 - [ ] Rubber band rendering (geometry on board)
-- [ ] Win condition + UI
+- [x] On-screen log overlay (font atlas + text pass; full game UI still TODO)
+- [ ] Win condition + UI (menus, buttons, etc.)
 
 ## Board + Pegs (done)
 

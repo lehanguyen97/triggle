@@ -4,7 +4,6 @@ import (
 	"unsafe"
 
 	"triggle/engine/backend"
-	"triggle/engine/gfx"
 	"triggle/engine/shader"
 	"triggle/engine/ui"
 	uicmd "triggle/engine/ui/cmd"
@@ -23,15 +22,15 @@ type MainRenderProgram interface {
 }
 
 type ForwardRenderer struct {
-	gpu   backend.Backend
-	cache *PipelineFamilyCache
-	mesh  map[int32]backend.MeshInfo
+	backend backend.Backend
+	cache   *PipelineFamilyCache
+	mesh    map[int32]backend.MeshInfo
 
 	programs map[RenderProgramID]MainRenderProgram
 
-	uiProgram *UIProgram
-	uiMesh    int32 // dynamic UI mesh; kept alive until after command buffer submit (see EmitUI).
-	uiCmds    []uicmd.UICmd
+	uiProgram  *UIProgram
+	uiMesh     int32 // dynamic UI mesh; kept alive until after command buffer submit (see EmitUI).
+	uiCmds     []uicmd.UICmd
 	uiBindings []ui.TextureBinding
 
 	shadowShader int32
@@ -58,23 +57,23 @@ type ForwardRenderer struct {
 // NewForwardRenderer builds shadow resources and registers built-in main-pass programs.
 func NewForwardRenderer(gpu backend.Backend) *ForwardRenderer {
 	r := &ForwardRenderer{
-		gpu:      gpu,
+		backend:  gpu,
 		cache:    NewPipelineFamilyCache(gpu),
 		mesh:     make(map[int32]backend.MeshInfo),
 		programs: make(map[RenderProgramID]MainRenderProgram),
 	}
 
-	r.shadowShader = gfx.CreateShader(gpu, shader.ShadowShaderDesc())
+	r.shadowShader = shader.CreateShader(gpu, shader.ShadowShaderDesc())
 
-	stride := int32(gfx.PhongVertexStride)
+	stride := int32(shader.PhongVertexStride)
 
 	r.shadowFamily = r.cache.RegisterPipelineFamily(PipelineFamilyDesc{
 		Shader:     r.shadowShader,
 		Stride:     stride,
-		Attrs:      []int{gfx.AttrFloat3},
-		DepthCmp:   gfx.CmpLessEqual,
+		Attrs:      []int{shader.AttrFloat3},
+		DepthCmp:   shader.CmpLessEqual,
 		DepthWrite: true,
-		Cull:       gfx.CullFront,
+		Cull:       shader.CullFront,
 		ColorCount: 0,
 	})
 
@@ -82,14 +81,14 @@ func NewForwardRenderer(gpu backend.Backend) *ForwardRenderer {
 	r.RegisterRenderProgram(RenderProgramToon, NewToonProgram())
 
 	r.uiProgram = NewUIProgram()
-	if !r.uiProgram.Init(r.gpu, r.cache) {
+	if !r.uiProgram.Init(r.backend, r.cache) {
 		r.uiProgram = nil
 	}
 	r.uiMesh = -1
 
-	r.shadowMap = gpu.ImageCreateTarget(1024, 1024, gfx.PixfmtDepth)
+	r.shadowMap = gpu.ImageCreateTarget(1024, 1024, shader.PixfmtDepth)
 	// Nearest filtering: WebGL warns that LINEAR + depth comparison is implementation-defined.
-	r.shadowSampler = gpu.SamplerCreate(gfx.FilterNearest, gfx.FilterNearest, gfx.WrapClampToEdge, gfx.CmpLessEqual)
+	r.shadowSampler = gpu.SamplerCreate(shader.FilterNearest, shader.FilterNearest, shader.WrapClampToEdge, shader.CmpLessEqual)
 	r.shadowPass = gpu.PassCreate(-1, r.shadowMap)
 
 	return r
@@ -100,18 +99,15 @@ func (r *ForwardRenderer) RegisterRenderProgram(id RenderProgramID, program Main
 	if program == nil {
 		return false
 	}
-	if !program.Init(r.gpu, r.cache) {
+	if !program.Init(r.backend, r.cache) {
 		return false
 	}
 	if old, ok := r.programs[id]; ok {
-		old.Release(r.gpu)
+		old.Release(r.backend)
 	}
 	r.programs[id] = program
 	return true
 }
-
-// GPU returns the backend handle for mesh upload and other direct calls.
-func (r *ForwardRenderer) GPU() backend.Backend { return r.gpu }
 
 // RegisterMeshInfo records immutable mesh metadata for draw-time cache lookups.
 func (r *ForwardRenderer) RegisterMeshInfo(mesh int32, indexCount int32, indexType int32) bool {
@@ -124,9 +120,9 @@ func (r *ForwardRenderer) RegisterMeshInfo(mesh int32, indexCount int32, indexTy
 
 // UploadMesh uploads u16-indexed geometry and registers mesh metadata once.
 func (r *ForwardRenderer) UploadMesh(vertices []float32, indices []uint16) int32 {
-	mesh := gfx.UploadMesh(r.gpu, vertices, indices)
+	mesh := UploadMesh(r.backend, vertices, indices)
 	if mesh >= 0 {
-		r.RegisterMeshInfo(mesh, int32(len(indices)), gfx.IndexUint16)
+		r.RegisterMeshInfo(mesh, int32(len(indices)), shader.IndexUint16)
 	}
 	return mesh
 }
@@ -136,7 +132,7 @@ func (r *ForwardRenderer) DestroyMesh(mesh int32) {
 	if mesh < 0 {
 		return
 	}
-	r.gpu.MeshDestroy(mesh)
+	r.backend.MeshDestroy(mesh)
 	delete(r.mesh, mesh)
 }
 
@@ -233,7 +229,7 @@ func (r *ForwardRenderer) meshInfo(mesh int32) (backend.MeshInfo, bool) {
 	if info, ok := r.mesh[mesh]; ok && info.IndexCount > 0 {
 		return info, true
 	}
-	info, ok := r.gpu.MeshInfo(mesh)
+	info, ok := r.backend.MeshInfo(mesh)
 	if !ok {
 		return backend.MeshInfo{}, false
 	}
@@ -243,7 +239,7 @@ func (r *ForwardRenderer) meshInfo(mesh int32) (backend.MeshInfo, bool) {
 
 // Release frees GPU allocations owned by the renderer (not meshes owned by game).
 func (r *ForwardRenderer) Release() {
-	g := r.gpu
+	g := r.backend
 	for _, p := range r.programs {
 		p.Release(g)
 	}
@@ -365,13 +361,13 @@ func (r *ForwardRenderer) flushCommandBuffer() {
 	}
 	if r.cmdPtr == 0 || r.cmdPtrCap < int32(len(buf)) {
 		if r.cmdPtr != 0 {
-			r.gpu.Free(r.cmdPtr)
+			r.backend.Free(r.cmdPtr)
 		}
-		r.cmdPtr = r.gpu.Malloc(int32(len(buf)))
+		r.cmdPtr = r.backend.Malloc(int32(len(buf)))
 		r.cmdPtrCap = int32(len(buf))
 	}
-	r.gpu.BulkCopy(r.cmdPtr, unsafe.Pointer(&buf[0]), int32(len(buf)))
-	r.gpu.SubmitCommandBuffer(r.cmdPtr, int32(len(buf)))
+	r.backend.BulkCopy(r.cmdPtr, unsafe.Pointer(&buf[0]), int32(len(buf)))
+	r.backend.SubmitCommandBuffer(r.cmdPtr, int32(len(buf)))
 }
 
 func bytesFromFloat32Slice(vals []float32) []byte {

@@ -1,9 +1,8 @@
 package ui
 
 import (
-	"fmt"
-
-	"triggle/engine/geom"
+	"triggle/engine/emath"
+	"triggle/engine/text"
 	"triggle/engine/ui/theme"
 )
 
@@ -18,49 +17,55 @@ const (
 )
 
 type windowState struct {
-	Pos        geom.Vec2
-	GrabOffset geom.Vec2
-	Dragging   bool
-	Inited     bool
+	PosX        int32
+	PosY        int32
+	GrabOffX    int32
+	GrabOffY    int32
+	Dragging    bool
+	Initialized bool
 }
 
-func (c *Context) emitWindowTitle(winID WidgetID, title string, win geom.Rect, titleH float32) {
-	if c == nil || c.uiFont == nil || title == "" {
+func (c *Context) emitWindowTitle(_ WidgetID, title string, win emath.Rect, titleH int32) {
+	if c == nil || c.font == nil || title == "" {
 		return
 	}
+	px := c.theme.TitlePx
 	tx := win.X + 6
-	ty := win.Y + titleH*0.5
-	if sz, err := c.uiFont.MeasureLine(title); err == nil {
-		ty -= sz[1] * 0.5
+	ty := win.Y + titleH/2
+	sz := c.font.Measure(title, px)
+	if sz[1] > 0 {
+		ty -= int32(sz[1] * 0.5)
 	} else {
-		ty -= c.uiFont.Metrics().Ascent * 0.5
+		ty -= c.font.Metrics(px).Ascent / 2
 	}
-	cacheKey := fmt.Sprintf("wintitle:%d", winID)
-	c.DrawText(cacheKey, title, tx, ty, c.theme.Colors[theme.ColorTitleText])
+	col := c.theme.Colors[theme.ColorTitleText]
+	c.font.Draw(&c.enc, title, tx, ty, px,
+		text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
 }
 
 // BeginWindow opens a draggable window with title bar and clips content to the client area.
-func (c *Context) BeginWindow(title string, rect geom.Rect, opt WindowOpt) bool {
+func (c *Context) BeginWindow(title string, rect emath.Rect, opt WindowOpt) bool {
 	if c == nil {
 		return false
 	}
 	c.idStack = append(c.idStack, "win:"+title)
 	id := c.hashID()
 	ws := StateOf[windowState](c, id)
-	if !ws.Inited {
-		ws.Pos = geom.Vec2{rect.X, rect.Y}
-		ws.Inited = true
+	if !ws.Initialized {
+		ws.PosX = rect.X
+		ws.PosY = rect.Y
+		ws.Initialized = true
 	}
 
-	titleH := float32(0)
+	titleH := int32(0)
 	if opt&WindowNoTitle == 0 {
-		titleH = float32(c.theme.TitleHeight)
+		titleH = c.theme.TitleHeight
 	}
 
-	win := geom.Rect{X: ws.Pos[0], Y: ws.Pos[1], W: rect.W, H: rect.H}
-	titleBar := geom.Rect{X: win.X, Y: win.Y, W: win.W, H: titleH}
+	win := emath.Rect{X: ws.PosX, Y: ws.PosY, W: rect.W, H: rect.H}
+	titleBar := emath.Rect{X: win.X, Y: win.Y, W: win.W, H: titleH}
 
-	mx, my := c.in.MousePos[0], c.in.MousePos[1]
+	mx, my := int32(c.in.MousePos[0]), int32(c.in.MousePos[1])
 	if win.Contains(mx, my) || ws.Dragging {
 		c.MarkHover()
 	}
@@ -68,13 +73,15 @@ func (c *Context) BeginWindow(title string, rect geom.Rect, opt WindowOpt) bool 
 	if opt&WindowNoTitle == 0 {
 		if titleBar.Contains(mx, my) && c.in.MousePressed&MouseLeft != 0 {
 			ws.Dragging = true
-			ws.GrabOffset = geom.Vec2{mx - ws.Pos[0], my - ws.Pos[1]}
+			ws.GrabOffX = mx - ws.PosX
+			ws.GrabOffY = my - ws.PosY
 			c.SetActive(id)
 		}
 		if ws.Dragging && c.in.MouseDown&MouseLeft != 0 {
-			ws.Pos = geom.Vec2{mx - ws.GrabOffset[0], my - ws.GrabOffset[1]}
-			win = geom.Rect{X: ws.Pos[0], Y: ws.Pos[1], W: rect.W, H: rect.H}
-			titleBar = geom.Rect{X: win.X, Y: win.Y, W: win.W, H: titleH}
+			ws.PosX = mx - ws.GrabOffX
+			ws.PosY = my - ws.GrabOffY
+			win = emath.Rect{X: ws.PosX, Y: ws.PosY, W: rect.W, H: rect.H}
+			titleBar = emath.Rect{X: win.X, Y: win.Y, W: win.W, H: titleH}
 		}
 		if c.in.MouseReleased&MouseLeft != 0 {
 			ws.Dragging = false
@@ -92,11 +99,11 @@ func (c *Context) BeginWindow(title string, rect geom.Rect, opt WindowOpt) bool 
 	}
 
 	pad := c.theme.Padding
-	content := geom.Rect{
-		X: win.X + float32(pad.Left),
-		Y: win.Y + titleH + float32(pad.Top),
-		W: win.W - float32(pad.Left+pad.Right),
-		H: win.H - titleH - float32(pad.Top+pad.Bottom),
+	content := emath.Rect{
+		X: win.X + pad.Left,
+		Y: win.Y + titleH + pad.Top,
+		W: win.W - pad.Left - pad.Right,
+		H: win.H - titleH - pad.Top - pad.Bottom,
 	}
 
 	c.pushLayout(content)

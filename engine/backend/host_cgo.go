@@ -82,8 +82,8 @@ func init() {
 		C.backend_sampler_destroy(C.backend_t(e), C.sampler_t(sampler))
 	}
 
-	Host.Text.FontOpen = func(e int32, path Ptr, pathLen int32, ptSize float32) int32 {
-		return int32(C.backend_text_font_open(C.backend_t(e), (*C.char)(unsafe.Pointer(path)), C.int(pathLen), C.float(ptSize)))
+	Host.Text.FontOpen = func(e int32, path Ptr, pathLen int32, ptSize int32) int32 {
+		return int32(C.backend_text_font_open(C.backend_t(e), (*C.char)(unsafe.Pointer(path)), C.int(pathLen), C.int(ptSize)))
 	}
 	Host.Text.FontClose = func(e int32, font int32) {
 		C.backend_text_font_close(C.backend_t(e), C.text_font_t(font))

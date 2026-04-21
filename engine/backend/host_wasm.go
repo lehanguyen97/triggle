@@ -68,7 +68,7 @@ func _backend_sampler_create(e int32, minFilter int32, magFilter int32, wrap int
 func _backend_sampler_destroy(e int32, sampler int32)
 
 //go:wasmimport env backend_text_font_open
-func _backend_text_font_open(e int32, path uint32, pathLen int32, ptSize float32) int32
+func _backend_text_font_open(e int32, path uint32, pathLen int32, ptSize int32) int32
 
 //go:wasmimport env backend_text_font_close
 func _backend_text_font_close(e int32, font int32)
@@ -150,7 +150,7 @@ func init() {
 	}
 	Host.Sampler.Destroy = func(e int32, sampler int32) { _backend_sampler_destroy(e, sampler) }
 
-	Host.Text.FontOpen = func(e int32, path Ptr, pathLen int32, ptSize float32) int32 {
+	Host.Text.FontOpen = func(e int32, path Ptr, pathLen int32, ptSize int32) int32 {
 		return _backend_text_font_open(e, uint32(path), pathLen, ptSize)
 	}
 	Host.Text.FontClose = func(e int32, font int32) { _backend_text_font_close(e, font) }

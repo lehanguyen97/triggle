@@ -1,8 +1,8 @@
 package render
 
 import (
-	"triggle/engine/geom"
-	"triggle/engine/gfx"
+	"triggle/engine/emath"
+	"triggle/engine/shader"
 	"triggle/engine/ui"
 	uicmd "triggle/engine/ui/cmd"
 )
@@ -11,7 +11,7 @@ type scissorRect struct {
 	x, y, w, h int32
 }
 
-func rectToScissor(r geom.Rect, vpW, vpH int32) scissorRect {
+func rectToScissor(r emath.Rect, vpW, vpH int32) scissorRect {
 	x := int32(r.X)
 	y := int32(r.Y)
 	w := int32(r.W)
@@ -50,7 +50,7 @@ func lookupTextureBinding(bindings []ui.TextureBinding, id uint32) (img, smp int
 
 type uiBatchRange struct {
 	bindID     uint32
-	sc scissorRect
+	sc         scissorRect
 	firstIndex int32
 	indexCount int32
 }
@@ -140,8 +140,8 @@ func (p *UIProgram) EmitUI(r *ForwardRenderer, cmds []uicmd.UICmd, bindings []ui
 		case uicmd.CmdQuad:
 			col := c.Color.Floats()
 			ensureBatch(c.BindID, curClip)
-			x0, y0 := c.Rect.X, c.Rect.Y
-			x1, y1 := c.Rect.X+c.Rect.W, c.Rect.Y+c.Rect.H
+			x0, y0 := float32(c.Rect.X), float32(c.Rect.Y)
+			x1, y1 := float32(c.Rect.X+c.Rect.W), float32(c.Rect.Y+c.Rect.H)
 			appendUIQuad(&verts, &indices, x0, y0, x1, y1, c.UV.U0, c.UV.V0, c.UV.U1, c.UV.V1, col)
 		}
 	}
@@ -167,7 +167,7 @@ func (p *UIProgram) EmitUI(r *ForwardRenderer, cmds []uicmd.UICmd, bindings []ui
 	}
 
 	ortho := screenOrthoMat(vpW, vpH)
-	pip := r.cache.Pipeline(p.mainFamily, gfx.IndexUint16)
+	pip := r.cache.Pipeline(p.mainFamily, shader.IndexUint16)
 
 	r.emitApplyScissor(0, 0, vpW, vpH)
 	curEmit := scissorRect{0, 0, vpW, vpH}

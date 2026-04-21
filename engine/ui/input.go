@@ -1,12 +1,12 @@
 package ui
 
-import "triggle/engine/geom"
+import "triggle/engine/emath"
 
 // InputFrame is one frame of unified input (accumulator model; see ui-design.md).
 type InputFrame struct {
-	MousePos      geom.Vec2
-	MouseDelta    geom.Vec2
-	ScrollDelta   geom.Vec2
+	MousePos      emath.Vec2
+	MouseDelta    emath.Vec2
+	ScrollDelta   emath.Vec2
 	MouseDown     uint8
 	MousePressed  uint8
 	MouseReleased uint8
@@ -26,7 +26,7 @@ func (in InputFrame) NextFrame() InputFrame {
 	in.MousePressed = 0
 	in.MouseReleased = 0
 	in.KeyPressed = 0
-	in.ScrollDelta = geom.Vec2{}
+	in.ScrollDelta = emath.Vec2{}
 	in.Text = ""
 	return in
 }

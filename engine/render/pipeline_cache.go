@@ -2,7 +2,7 @@ package render
 
 import (
 	"triggle/engine/backend"
-	"triggle/engine/gfx"
+	"triggle/engine/shader"
 )
 
 // PipelineFamilyID identifies a logical pipeline (u16/u32 variants are internal).
@@ -33,21 +33,21 @@ func NewPipelineFamilyCache(gpu backend.Backend) *PipelineFamilyCache {
 
 // RegisterPipelineFamily registers a family and returns its id.
 func (c *PipelineFamilyCache) RegisterPipelineFamily(desc PipelineFamilyDesc) PipelineFamilyID {
-	d16 := gfx.PipelineDesc{
+	d16 := PipelineDesc{
 		Shader:     desc.Shader,
 		Stride:     desc.Stride,
 		Attrs:      desc.Attrs,
 		DepthCmp:   desc.DepthCmp,
 		DepthWrite: desc.DepthWrite,
 		Cull:       desc.Cull,
-		IndexType:  gfx.IndexUint16,
+		IndexType:  shader.IndexUint16,
 		ColorCount: desc.ColorCount,
 		Blend:      desc.Blend,
 	}
 	d32 := d16
-	d32.IndexType = gfx.IndexUint32
-	p16 := gfx.CreatePipeline(c.gpu, d16)
-	p32 := gfx.CreatePipeline(c.gpu, d32)
+	d32.IndexType = shader.IndexUint32
+	p16 := CreatePipeline(c.gpu, d16)
+	p32 := CreatePipeline(c.gpu, d32)
 	c.items = append(c.items, struct{ pip16, pip32 int32 }{p16, p32})
 	return PipelineFamilyID(len(c.items) - 1)
 }
@@ -57,7 +57,7 @@ func (c *PipelineFamilyCache) Pipeline(family PipelineFamilyID, indexType int32)
 	if int(family) < 0 || int(family) >= len(c.items) {
 		return -1
 	}
-	if indexType == gfx.IndexUint32 {
+	if indexType == shader.IndexUint32 {
 		return c.items[family].pip32
 	}
 	return c.items[family].pip16
