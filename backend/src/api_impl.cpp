@@ -95,6 +95,7 @@ enum BackendCmdOpcode : uint8_t {
     BACKEND_CMD_APPLY_UNIFORMS = 7,
     BACKEND_CMD_DRAW_ELEMENTS = 8,
     BACKEND_CMD_COMMIT = 9,
+    BACKEND_CMD_APPLY_SCISSOR = 10,
 };
 
 static constexpr uint32_t BACKEND_CMD_MAGIC = 0x31424354u; /* TCB1 */
@@ -360,6 +361,13 @@ EXPORT shader_t backend_shader_create(backend_t et, void* desc_data, int32_t des
     return id;
 }
 
+EXPORT void backend_shader_destroy(backend_t et, shader_t shader) {
+    if (!e || et != 0 || shader < 0 || shader >= (shader_t)e->shaders.size()) return;
+    if (e->shaders[shader].id == SG_INVALID_ID) return;
+    sg_destroy_shader(e->shaders[shader]);
+    e->shaders[shader] = sg_shader{SG_INVALID_ID};
+}
+
 /* --- Pipeline (binary descriptor) --- */
 EXPORT pipeline_t backend_pipeline_create(backend_t et, void* desc_data, int32_t desc_len) {
     if (!e || et != 0) return -1;
@@ -386,6 +394,7 @@ EXPORT pipeline_t backend_pipeline_create(backend_t et, void* desc_data, int32_t
     uint8_t cull = r.read_u8();
     uint8_t idx_type = r.read_u8();
     uint8_t color_count = r.read_u8();
+    uint8_t blend_enabled = r.read_u8();
 
     if (depth_cmp != BACKEND_CMP_NONE) {
         desc.depth.compare = map_compare(depth_cmp);
@@ -401,11 +410,25 @@ EXPORT pipeline_t backend_pipeline_create(backend_t et, void* desc_data, int32_t
         desc.depth.pixel_format = SG_PIXELFORMAT_DEPTH;
     } else {
         desc.color_count = color_count;
+        if (blend_enabled) {
+            desc.colors[0].blend.enabled = true;
+            desc.colors[0].blend.src_factor_rgb = SG_BLENDFACTOR_SRC_ALPHA;
+            desc.colors[0].blend.dst_factor_rgb = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+            desc.colors[0].blend.src_factor_alpha = SG_BLENDFACTOR_ONE;
+            desc.colors[0].blend.dst_factor_alpha = SG_BLENDFACTOR_ONE_MINUS_SRC_ALPHA;
+        }
     }
     sg_pipeline pip = sg_make_pipeline(&desc);
     pipeline_t id = (pipeline_t)e->pipelines.size();
     e->pipelines.push_back(pip);
     return id;
+}
+
+EXPORT void backend_pipeline_destroy(backend_t et, pipeline_t pipeline) {
+    if (!e || et != 0 || pipeline < 0 || pipeline >= (pipeline_t)e->pipelines.size()) return;
+    if (e->pipelines[pipeline].id == SG_INVALID_ID) return;
+    sg_destroy_pipeline(e->pipelines[pipeline]);
+    e->pipelines[pipeline] = sg_pipeline{SG_INVALID_ID};
 }
 
 /* --- Image (render target) --- */
@@ -446,6 +469,63 @@ EXPORT image_t backend_image_create_target(backend_t et, int32_t w, int32_t h, i
     return id;
 }
 
+EXPORT image_t backend_image_create_texture(backend_t et, int32_t w, int32_t h, int32_t pixel_format) {
+    if (!e || et != 0 || w <= 0 || h <= 0) return -1;
+    if (pixel_format != BACKEND_PIXFMT_RGBA8) return -1;
+
+    sg_image_desc desc = {};
+    desc.type = SG_IMAGETYPE_2D;
+    desc.width = w;
+    desc.height = h;
+    desc.pixel_format = SG_PIXELFORMAT_RGBA8;
+    desc.usage.immutable = false;
+    desc.usage.dynamic_update = true;
+    desc.sample_count = 1;
+
+    sg_image img = sg_make_image(&desc);
+    image_t id = (image_t)e->images.size();
+    e->images.push_back(img);
+
+    while ((int32_t)e->views.size() <= id * 2 + 1) {
+        sg_view empty = {};
+        e->views.push_back(empty);
+    }
+    e->views[id * 2] = {};
+    sg_view_desc tex_vd = {};
+    tex_vd.texture.image = img;
+    e->views[id * 2 + 1] = sg_make_view(&tex_vd);
+
+    return id;
+}
+
+EXPORT void backend_image_update_rgba8(backend_t et, image_t img, int32_t w, int32_t h,
+                                       const void* pixels, int32_t num_bytes) {
+    if (!e || et != 0 || img < 0 || img >= (image_t)e->images.size()) return;
+    if (w <= 0 || h <= 0 || !pixels) return;
+    if (num_bytes != w * h * 4) return;
+
+    sg_image_data data = {};
+    data.subimage[0][0] = sg_range{pixels, (size_t)num_bytes};
+    sg_update_image(e->images[img], &data);
+}
+
+EXPORT void backend_image_destroy(backend_t et, image_t img) {
+    if (!e || et != 0 || img < 0 || img >= (image_t)e->images.size()) return;
+    if (e->images[img].id == SG_INVALID_ID) return;
+    int32_t att_idx = img * 2;
+    int32_t tex_idx = img * 2 + 1;
+    if (att_idx < (int32_t)e->views.size() && e->views[att_idx].id != SG_INVALID_ID) {
+        sg_destroy_view(e->views[att_idx]);
+        e->views[att_idx] = sg_view{SG_INVALID_ID};
+    }
+    if (tex_idx < (int32_t)e->views.size() && e->views[tex_idx].id != SG_INVALID_ID) {
+        sg_destroy_view(e->views[tex_idx]);
+        e->views[tex_idx] = sg_view{SG_INVALID_ID};
+    }
+    sg_destroy_image(e->images[img]);
+    e->images[img] = sg_image{SG_INVALID_ID};
+}
+
 /* --- Sampler --- */
 EXPORT sampler_t backend_sampler_create(backend_t et,
                                         int32_t min_filter, int32_t mag_filter,
@@ -465,6 +545,13 @@ EXPORT sampler_t backend_sampler_create(backend_t et,
     sampler_t id = (sampler_t)e->samplers.size();
     e->samplers.push_back(smp);
     return id;
+}
+
+EXPORT void backend_sampler_destroy(backend_t et, sampler_t sampler) {
+    if (!e || et != 0 || sampler < 0 || sampler >= (sampler_t)e->samplers.size()) return;
+    if (e->samplers[sampler].id == SG_INVALID_ID) return;
+    sg_destroy_sampler(e->samplers[sampler]);
+    e->samplers[sampler] = sg_sampler{SG_INVALID_ID};
 }
 
 /* --- Pass create: returns a pass_t for offscreen rendering.
@@ -587,6 +674,12 @@ EXPORT void backend_submit_command_buffer(backend_t et, void* data, int32_t len)
             }
             case BACKEND_CMD_COMMIT: {
                 sg_commit();
+                break;
+            }
+            case BACKEND_CMD_APPLY_SCISSOR: {
+                int32_t x = 0, y = 0, w = 0, h = 0;
+                if (!r.read_i32(&x) || !r.read_i32(&y) || !r.read_i32(&w) || !r.read_i32(&h)) return;
+                sg_apply_scissor_rect(x, y, w, h, true);
                 break;
             }
             default:

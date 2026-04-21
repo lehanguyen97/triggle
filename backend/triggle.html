@@ -75,6 +75,42 @@
                             return new TextDecoder().decode(
                                 new Uint8Array(gameExports.memory.buffer, ptr, len));
                         };
+                        let nextTextFont = 1;
+                        const textFonts = new Map();
+                        const textCanvas = document.createElement('canvas');
+                        const textCtx = textCanvas.getContext('2d', { willReadFrequently: true });
+                        const gameMem = () => new DataView(gameExports.memory.buffer);
+                        const setTextFont = (state) => {
+                            textCtx.font = `${state.fontPx}px monospace,sans-serif`;
+                            textCtx.fillStyle = '#ffffff';
+                            textCtx.textBaseline = 'alphabetic';
+                        };
+                        const measureFontMetrics = (state) => {
+                            setTextFont(state);
+                            const m = textCtx.measureText('Mg');
+                            const ascent = Math.max(1, Math.ceil(m.actualBoundingBoxAscent || state.fontPx));
+                            const descent = Math.max(0, Math.ceil(m.actualBoundingBoxDescent || state.fontPx * 0.25));
+                            const lineSkip = Math.max(1, Math.ceil((ascent + descent) * 1.15));
+                            return {
+                                height: lineSkip,
+                                ascent,
+                                descent,
+                                lineSkip,
+                            };
+                        };
+                        const measureRunLayout = (state, s) => {
+                            setTextFont(state);
+                            const m = textCtx.measureText(s);
+                            const advance = Math.max(0, Math.ceil(m.width || 0));
+                            const left = Math.max(0, Math.ceil(m.actualBoundingBoxLeft || 0));
+                            const rawRight = Math.max(0, Math.ceil(m.actualBoundingBoxRight || 0));
+                            const right = Math.max(advance, rawRight);
+                            const ascent = Math.max(0, Math.ceil(m.actualBoundingBoxAscent || state.metrics.ascent));
+                            const descent = Math.max(0, Math.ceil(m.actualBoundingBoxDescent || state.metrics.descent));
+                            const width = Math.min(2048, Math.max(advance, left + right));
+                            const height = Math.min(2048, Math.max(1, ascent + descent));
+                            return { left, ascent, width, height, stride: width * 4 };
+                        };
 
                         // Auto-forward all backend_* exports to game imports
                         const env = {
@@ -83,6 +119,90 @@
                             },
                             backend_log_warning: (msgPtr, msgLen) => {
                                 console.warn(utf8FromGame(msgPtr, msgLen));
+                            },
+                            backend_text_font_open: (_e, _pathPtr, _pathLen, ptSize) => {
+                                const handle = nextTextFont++;
+                                const state = {
+                                    fontPx: Math.max(8, Math.round(ptSize)),
+                                };
+                                state.metrics = measureFontMetrics(state);
+                                textFonts.set(handle, state);
+                                return handle;
+                            },
+                            backend_text_font_close: (_e, font) => {
+                                textFonts.delete(font);
+                            },
+                            backend_text_font_get_metrics: (_e, font, outPtr) => {
+                                const state = textFonts.get(font);
+                                if (!state || outPtr === 0) return -1;
+                                const mem = gameMem();
+                                mem.setInt32(outPtr + 0, state.metrics.height, true);
+                                mem.setInt32(outPtr + 4, state.metrics.ascent, true);
+                                mem.setInt32(outPtr + 8, state.metrics.descent, true);
+                                mem.setInt32(outPtr + 12, state.metrics.lineSkip, true);
+                                return 0;
+                            },
+                            backend_text_measure_utf8: (_e, font, textPtr, textLen, outPtr) => {
+                                const state = textFonts.get(font);
+                                if (!state || outPtr === 0) return -1;
+                                const mem = gameMem();
+                                const utf8 = textLen > 0 ? utf8FromGame(textPtr, textLen) : '';
+                                const s = utf8.normalize('NFC');
+                                if (s.length === 0) {
+                                    mem.setInt32(outPtr + 0, 0, true);
+                                    mem.setInt32(outPtr + 4, 0, true);
+                                    return 0;
+                                }
+                                setTextFont(state);
+                                const w = Math.max(0, Math.round(textCtx.measureText(s).width * 64));
+                                const h = state.metrics.lineSkip * 64;
+                                mem.setInt32(outPtr + 0, w, true);
+                                mem.setInt32(outPtr + 4, h, true);
+                                return 0;
+                            },
+                            backend_text_raster_utf8_rgba8: (_e, font, textPtr, textLen, outPixelsPtr, pixelCap, outBitmapPtr) => {
+                                const state = textFonts.get(font);
+                                if (!state || outBitmapPtr === 0) return -1;
+                                try {
+                                    const mem = gameMem();
+                                    const utf8 = textLen > 0 ? utf8FromGame(textPtr, textLen) : '';
+                                    const s = utf8.normalize('NFC');
+                                    if (s.length === 0) {
+                                        mem.setInt32(outBitmapPtr + 0, 0, true);
+                                        mem.setInt32(outBitmapPtr + 4, 0, true);
+                                        mem.setInt32(outBitmapPtr + 8, 0, true);
+                                        mem.setInt32(outBitmapPtr + 12, 0, true);
+                                        return 0;
+                                    }
+                                    const layout = measureRunLayout(state, s);
+                                    mem.setInt32(outBitmapPtr + 0, layout.width, true);
+                                    mem.setInt32(outBitmapPtr + 4, layout.height, true);
+                                    mem.setInt32(outBitmapPtr + 8, layout.ascent, true);
+                                    mem.setInt32(outBitmapPtr + 12, layout.stride, true);
+                                    if (layout.width === 0 || layout.height === 0) {
+                                        return 0;
+                                    }
+                                    if (outPixelsPtr === 0 || pixelCap <= 0) {
+                                        return 0;
+                                    }
+                                    if (pixelCap < layout.width * layout.height * 4) {
+                                        console.warn('backend_text_raster_utf8_rgba8: pixelCap too small', {
+                                            width: layout.width, height: layout.height, pixelCap,
+                                        });
+                                        return -1;
+                                    }
+                                    textCanvas.width = layout.width;
+                                    textCanvas.height = layout.height;
+                                    setTextFont(state);
+                                    textCtx.clearRect(0, 0, layout.width, layout.height);
+                                    textCtx.fillText(s, layout.left, layout.ascent);
+                                    const img = textCtx.getImageData(0, 0, layout.width, layout.height);
+                                    new Uint8Array(gameExports.memory.buffer, outPixelsPtr, layout.width * layout.height * 4).set(img.data);
+                                    return 0;
+                                } catch (err) {
+                                    console.warn('backend_text_raster_utf8_rgba8 failed', { font, err });
+                                    return -1;
+                                }
                             },
                             bulk_copy: (dst, src, len) => {
                                 new Uint8Array(backendMemory.buffer, dst, len)
