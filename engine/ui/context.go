@@ -59,11 +59,45 @@ type Context struct {
 	states  map[WidgetID]any
 
 	activeID   WidgetID
+	focusID    WidgetID
 	wantsMouse bool
 	wantsKb    bool
 	wantsText  bool
 
-	layoutStack []emath.Rect
+	focusableRects []emath.Rect
+
+	layoutStack []layoutFrame
+
+	textInputHost textInputHostState
+}
+
+// layoutFrame is one entry on Context.layoutStack: the slot a container hands
+// to its children plus a vertical pen that advances per row. ImGui calls this
+// `window->DC` (cursor + content rect); we keep just the pieces widgets need.
+//
+// rect.H/rect.W may be MaxInt32 for auto-sized windows — the pen still
+// advances and EndWindow patches the placeholder bg + clip commands using
+// (cursorY, maxX, win* + pad*) once content is measured.
+type layoutFrame struct {
+	rect    emath.Rect
+	startY  int32
+	cursorY int32
+	maxX    int32
+	spacing int32
+
+	// Auto-size-Y patch payload (only set by BeginWindow when the caller
+	// requested WindowAutoSizeY). EndWindow rewrites the bgCmd quad and
+	// clipCmd push to the measured outer rect once cursorY has advanced.
+	// Width auto-size isn't supported yet; it would need a second pair of
+	// patch indices for the title bar and is rarely useful in practice.
+	autoH   bool
+	bgCmd   int
+	clipCmd int
+	winX    int32
+	winY    int32
+	winW    int32
+	titleH  int32
+	padBot  int32
 }
 
 // NewContext validates options and creates the shared white texture (bind 1).
@@ -149,10 +183,12 @@ func (c *Context) Begin(in InputFrame, viewport emath.Rect, dt float32) {
 	c.dt = dt
 	c.idStack = c.idStack[:0]
 	c.layoutStack = c.layoutStack[:0]
+	c.focusableRects = c.focusableRects[:0]
 	c.enc.Reset(viewport)
 	c.wantsMouse = false
 	c.wantsKb = false
-	c.wantsText = false
+	c.wantsText = c.focusID != 0
+	c.beginTextInputPoll()
 }
 
 // End finalizes the frame.
@@ -163,6 +199,22 @@ func (c *Context) End() {
 	if c.activeID != 0 {
 		c.wantsMouse = true
 	}
+	// Click outside any focusable widget clears focus.
+	if c.focusID != 0 && c.in.MousePressed&MouseLeft != 0 {
+		mx, my := int32(c.in.MousePos[0]), int32(c.in.MousePos[1])
+		hit := false
+		for _, r := range c.focusableRects {
+			if r.Contains(mx, my) {
+				hit = true
+				break
+			}
+		}
+		if !hit {
+			c.focusID = 0
+			c.wantsText = false
+		}
+	}
+	c.endTextInputReconcile()
 }
 
 // Commands returns the UI command stream for SubmitUI.
@@ -237,13 +289,65 @@ func (c *Context) WantsKeyboard() bool { return c != nil && c.wantsKb }
 // WantsTextInput reports whether a text-editing widget has focus.
 func (c *Context) WantsTextInput() bool { return c != nil && c.wantsText }
 
+// SetFocus sets the sticky focus id (used for text input widgets).
+func (c *Context) SetFocus(id WidgetID) {
+	if c == nil {
+		return
+	}
+	c.focusID = id
+	c.wantsText = id != 0
+}
+
+// ClearFocus clears focus if it matches id.
+func (c *Context) ClearFocus(id WidgetID) {
+	if c == nil {
+		return
+	}
+	if c.focusID == id {
+		c.focusID = 0
+		c.wantsText = false
+	}
+}
+
+// IsFocused reports whether id holds focus.
+func (c *Context) IsFocused(id WidgetID) bool {
+	return c != nil && c.focusID == id && id != 0
+}
+
+// FocusID returns the currently focused widget id (0 if none).
+func (c *Context) FocusID() WidgetID {
+	if c == nil {
+		return 0
+	}
+	return c.focusID
+}
+
+// RegisterFocusable records rect as a focusable widget this frame (used by End() for click-outside).
+func (c *Context) RegisterFocusable(r emath.Rect) {
+	if c == nil {
+		return
+	}
+	c.focusableRects = append(c.focusableRects, r)
+}
+
 // Close releases CPU-side context state and the shared white texture.
 // Font is owned by the caller and must be closed separately.
+//
+// Drops anything Context created on widgets' behalf BEFORE the white texture,
+// so a focused text-input doesn't outlive Close with a stranded DOM overlay
+// or a leaked volatile line texture (see ai/text-review.md M2/M3).
 func (c *Context) Close() {
 	if c == nil {
 		return
 	}
 	b := c.backend
+	if c.textInputHost.owner != 0 {
+		b.TextInputEnd()
+		c.textInputHost.owner = 0
+	}
+	if c.focusID != 0 && c.font != nil {
+		c.font.DropVolatile(uint32(c.focusID))
+	}
 	if c.white.image >= 0 {
 		b.ImageDestroy(c.white.image)
 		c.white.image = -1
@@ -255,7 +359,9 @@ func (c *Context) Close() {
 	c.states = nil
 }
 
-// ContentRect is the inner layout rectangle of the current container (or full viewport).
+// ContentRect is the inner layout rectangle of the current container (or full
+// viewport). For auto-sized containers H may be MaxInt32; widgets that need a
+// drawable height should call Avail or LayoutNextRow instead.
 func (c *Context) ContentRect() emath.Rect {
 	if c == nil {
 		return emath.Rect{}
@@ -263,19 +369,73 @@ func (c *Context) ContentRect() emath.Rect {
 	if len(c.layoutStack) == 0 {
 		return c.viewport
 	}
-	return c.layoutStack[len(c.layoutStack)-1]
+	return c.layoutStack[len(c.layoutStack)-1].rect
 }
 
-func (c *Context) pushLayout(r emath.Rect) {
+// Avail returns the remaining slot inside the current container — from the
+// pen down to the container's bottom edge, full container width. This is the
+// ImGui `GetContentRegionAvail` analogue.
+func (c *Context) Avail() emath.Rect {
+	if c == nil || len(c.layoutStack) == 0 {
+		return c.viewport
+	}
+	f := &c.layoutStack[len(c.layoutStack)-1]
+	h := f.rect.Y + f.rect.H - f.cursorY
+	if h < 0 {
+		h = 0
+	}
+	return emath.Rect{X: f.rect.X, Y: f.cursorY, W: f.rect.W, H: h}
+}
+
+// LayoutNextRow reserves the next vertical slot of height h (full container
+// width) and advances the pen by h. Subsequent rows automatically get a
+// theme.Spacing gap inserted before their Y. Widgets call this once at the
+// top of their build to claim space; the pen then drives auto-sized windows
+// and stacked layout.
+//
+// h <= 0 still reserves a row (zero height) and counts toward the spacing
+// gap on the next call (matches ImGui's `ItemSize` semantics).
+func (c *Context) LayoutNextRow(h int32) emath.Rect {
+	if c == nil {
+		return emath.Rect{}
+	}
+	if len(c.layoutStack) == 0 {
+		// No active container: behave like the bare viewport, no pen.
+		return c.viewport
+	}
+	f := &c.layoutStack[len(c.layoutStack)-1]
+	if f.cursorY > f.startY {
+		f.cursorY += f.spacing
+	}
+	row := emath.Rect{X: f.rect.X, Y: f.cursorY, W: f.rect.W, H: h}
+	if h < 0 {
+		h = 0
+	}
+	right := row.X + row.W
+	if right > f.maxX {
+		f.maxX = right
+	}
+	f.cursorY += h
+	return row
+}
+
+// pushLayout starts a new container frame. Caller fills rect + spacing; this
+// initializes the pen and used-extent trackers from rect's top-left.
+func (c *Context) pushLayout(f layoutFrame) {
 	if c == nil {
 		return
 	}
-	c.layoutStack = append(c.layoutStack, r)
+	f.startY = f.rect.Y
+	f.cursorY = f.rect.Y
+	f.maxX = f.rect.X
+	c.layoutStack = append(c.layoutStack, f)
 }
 
-func (c *Context) popLayout() {
+func (c *Context) popLayout() (layoutFrame, bool) {
 	if c == nil || len(c.layoutStack) == 0 {
-		return
+		return layoutFrame{}, false
 	}
+	f := c.layoutStack[len(c.layoutStack)-1]
 	c.layoutStack = c.layoutStack[:len(c.layoutStack)-1]
+	return f, true
 }

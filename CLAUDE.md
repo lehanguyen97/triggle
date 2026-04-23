@@ -40,6 +40,8 @@ Branch `wasm-go`. Hex board (side=5, 91 pegs) + sphere pegs, Phong + shadow map,
 - Every `*_create` has a matching `*_destroy`; renderer `Release` paths invoke them.
 - WASM `triggle.html` auto-forwards `Module._backend_*` exports into game `env` imports.
 - Native-only text APIs (`ShapeUTF8`, `RasterGlyphRGBA8`) live on `Host.Text` in `host_native.go`; WASM has `RasterLineRGBA8` instead.
+- Host-owned text-input session uses SDL3-style names (`Backend.TextInput{Begin,End,Poll}`): real on WASM (hidden `<input>` overlay), no-op stubs on native sokol. Keeps `engine/ui` platform-blind; SDL3 native swap fills stubs without UI churn.
+- UI layout is a vertical pen (ImGui-style): widgets call `Context.LayoutNextRow(h)` instead of carving from `ContentRect`; `WindowAutoSizeY` patches the window bg/clip at `EndWindow` from the measured pen advance via `cmd.Encoder.PatchRect`. Callers stack widgets inside one window instead of pre-summing component heights.
 
 ## Build
 

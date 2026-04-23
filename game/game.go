@@ -3,6 +3,7 @@ package main
 import (
 	"errors"
 	"math"
+	"unicode/utf8"
 
 	mgl "github.com/go-gl/mathgl/mgl32"
 
@@ -24,6 +25,23 @@ const (
 	EvMouseMove   = 5
 	EvMouseScroll = 6
 	EvResize      = 7
+	EvText        = 8
+)
+
+// Editing key codes (match game_api.h GK_*). Character keys are not listed —
+// they arrive as UTF-32 codepoints via EvText.
+const (
+	gkEscape    = 28
+	gkEnter     = 29
+	gkBackspace = 30
+	gkDelete    = 31
+	gkLeft      = 32
+	gkRight     = 33
+	gkUp        = 34
+	gkDown      = 35
+	gkHome      = 36
+	gkEnd       = 37
+	gkTab       = 38
 )
 
 // game_frame: return 0 on success, non-zero on error (opaque to host).
@@ -109,6 +127,7 @@ type Game struct {
 	uiFont        *text.Font
 	uiInput       ui.InputFrame
 	uiBlocksMouse bool
+	uiBlocksKey   bool
 	dpiScale      float32
 
 	logBuf []string
@@ -267,6 +286,7 @@ func (g *Game) update(dt float32) int32 {
 		g.buildUI()
 		g.uiCtx.End()
 		g.uiBlocksMouse = g.uiCtx.WantsMouse()
+		g.uiBlocksKey = g.uiCtx.WantsTextInput()
 	}
 
 	cam := render.CameraState{ViewProj: g.viewProj, CameraPos: g.cameraPos}
@@ -443,6 +463,23 @@ func (g *Game) handleEvent(
 	mods := isDown // isDown carries modifier flags for mouse events
 
 	switch evType {
+	case EvKeyDown, EvKeyUp:
+		key := gkToUIKey(keyOrBtn)
+		if key != ui.KeyUnknown {
+			g.uiInput.KeyEvents = append(g.uiInput.KeyEvents, ui.KeyEvent{
+				Key:    key,
+				Down:   evType == EvKeyDown,
+				Repeat: isRepeat&1 != 0,
+				Mods:   uint8((isRepeat >> 8) & 0xF),
+			})
+		}
+	case EvText:
+		cp := rune(keyOrBtn)
+		if cp > 0 && utf8.ValidRune(cp) {
+			var buf [4]byte
+			n := utf8.EncodeRune(buf[:], cp)
+			g.uiInput.Text += string(buf[:n])
+		}
 	case EvMouseDown:
 		g.mouseX = mouseX
 		g.mouseY = mouseY
@@ -845,6 +882,34 @@ func (g *Game) rebuildPreviewMesh() error {
 	}
 	g.previewHasQuads = true
 	return nil
+}
+
+func gkToUIKey(gk int32) ui.KeyCode {
+	switch gk {
+	case gkEscape:
+		return ui.KeyEscape
+	case gkEnter:
+		return ui.KeyEnter
+	case gkBackspace:
+		return ui.KeyBackspace
+	case gkDelete:
+		return ui.KeyDelete
+	case gkLeft:
+		return ui.KeyLeft
+	case gkRight:
+		return ui.KeyRight
+	case gkUp:
+		return ui.KeyUp
+	case gkDown:
+		return ui.KeyDown
+	case gkHome:
+		return ui.KeyHome
+	case gkEnd:
+		return ui.KeyEnd
+	case gkTab:
+		return ui.KeyTab
+	}
+	return ui.KeyUnknown
 }
 
 func main() {}

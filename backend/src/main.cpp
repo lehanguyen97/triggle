@@ -56,10 +56,19 @@ static int map_keycode(sapp_keycode kc) {
         return GK_A + (kc - SAPP_KEYCODE_A);
     }
     switch (kc) {
-        case SAPP_KEYCODE_SPACE:  return GK_SPACE;
-        case SAPP_KEYCODE_ESCAPE: return GK_ESCAPE;
-        case SAPP_KEYCODE_ENTER:  return GK_ENTER;
-        default:                  return GK_UNKNOWN;
+        case SAPP_KEYCODE_SPACE:     return GK_SPACE;
+        case SAPP_KEYCODE_ESCAPE:    return GK_ESCAPE;
+        case SAPP_KEYCODE_ENTER:     return GK_ENTER;
+        case SAPP_KEYCODE_BACKSPACE: return GK_BACKSPACE;
+        case SAPP_KEYCODE_DELETE:    return GK_DELETE;
+        case SAPP_KEYCODE_LEFT:      return GK_LEFT;
+        case SAPP_KEYCODE_RIGHT:     return GK_RIGHT;
+        case SAPP_KEYCODE_UP:        return GK_UP;
+        case SAPP_KEYCODE_DOWN:      return GK_DOWN;
+        case SAPP_KEYCODE_HOME:      return GK_HOME;
+        case SAPP_KEYCODE_END:       return GK_END;
+        case SAPP_KEYCODE_TAB:       return GK_TAB;
+        default:                     return GK_UNKNOWN;
     }
 }
 
@@ -96,8 +105,15 @@ void on_event(const sapp_event* sev) {
             int32_t type = sev->type == SAPP_EVENTTYPE_KEY_DOWN ? G_EVENT_KEY_DOWN : G_EVENT_KEY_UP;
             int32_t kc = map_keycode(sev->key_code);
             int32_t down = sev->type == SAPP_EVENTTYPE_KEY_DOWN ? 1 : 0;
-            int32_t rep = sev->key_repeat ? 1 : 0;
+            int32_t rep = (sev->key_repeat ? 1 : 0) | ((int32_t)sev->modifiers << 8);
             game_event(game, type, kc, down, rep, 0, 0, 0, 0, w, h);
+            break;
+        }
+        case SAPP_EVENTTYPE_CHAR: {
+            int32_t cp = (int32_t)sev->char_code;
+            if (cp > 0 && cp < 0x110000) {
+                game_event(game, G_EVENT_TEXT, cp, 0, 0, 0, 0, 0, 0, w, h);
+            }
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_DOWN:
@@ -148,5 +164,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .window_title = "Triggle",
         .logger = {.func = slog_func},
         .html5_canvas_resize = false,
+        .html5_bubble_key_events = true,
+        .html5_bubble_char_events = true,
     };
 }

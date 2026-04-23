@@ -190,8 +190,9 @@ int32_t backend_text_measure_utf8(backend_t backend,
 
 /* Text — native-only: HarfBuzz shaping + FreeType glyph rasterization.
  * The browser does not expose comparable per-glyph shaping, so WASM does NOT
- * implement these. WASM uses backend_text_raster_utf8_rgba8 (whole-line raster)
- * declared as a JS env import in backend/triggle.html. See ai/ui-design.md. */
+ * implement these. WASM uses a JS env import in backend/triggle.html:
+ *   - backend_text_raster_utf8_rgba8_backend: raster whole line into backend WASM memory
+ * See ai/ui-design.md. */
 int32_t backend_text_shape_utf8(backend_t e,
                                 text_font_t font,
                                 const void* utf8,

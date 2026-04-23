@@ -4,7 +4,6 @@ package text
 
 import (
 	"fmt"
-	"unsafe"
 
 	"triggle/engine/backend"
 	"triggle/engine/emath"
@@ -32,37 +31,98 @@ func (p platState) close(b backend.Backend) {
 	}
 }
 
-// shapeLine rasterizes s via the browser text backend, crops alpha bounds, and
-// uploads a per-line GPU texture. Draw emits a single quad over that texture.
+// rasterLine calls the single-shot JS raster: JS measures, allocates backend
+// memory, draws, and returns the pointer. One WASM boundary crossing, one
+// Canvas measureText call. Caller must Free bitmap.PixelsPtr after GPU upload.
+func (srv *textServer) rasterLine(h int32, s string) (backend.TextRunBitmap, error) {
+	bitmap, ok := srv.b.TextRasterAllocLineRGBA8Backend(h, s)
+	if !ok {
+		return backend.TextRunBitmap{}, fmt.Errorf("text: run raster failed")
+	}
+	return bitmap, nil
+}
+
+func (srv *textServer) buildCachedLine(bitmap backend.TextRunBitmap) (*cachedLine, error) {
+	if bitmap.WidthPx <= 0 || bitmap.HeightPx <= 0 {
+		if bitmap.PixelsPtr != 0 {
+			srv.b.Free(bitmap.PixelsPtr)
+		}
+		return &cachedLine{img: -1, samp: srv.plat.sampler}, nil
+	}
+	numBytes := bitmap.WidthPx * bitmap.HeightPx * 4
+	defer srv.b.Free(bitmap.PixelsPtr)
+	img := srv.b.ImageCreateTexture(bitmap.WidthPx, bitmap.HeightPx, shader.PixfmtRGBA8)
+	if img < 0 {
+		return nil, fmt.Errorf("text: line texture create failed")
+	}
+	srv.b.ImageUpdateRGBA8BackendPtr(img, bitmap.WidthPx, bitmap.HeightPx, bitmap.PixelsPtr, numBytes)
+	return &cachedLine{
+		img:  img,
+		samp: srv.plat.sampler,
+		glyphs: []lineQuad{{
+			Dst: emath.Rect{X: 0, Y: 0, W: bitmap.WidthPx, H: bitmap.HeightPx},
+			UV:  emath.UVRect{U0: 0, V0: 0, U1: 1, V1: 1},
+		}},
+		size:       emath.Vec2{float32(bitmap.WidthPx), float32(bitmap.HeightPx)},
+		perLineImg: true,
+	}, nil
+}
+
+// shapeLine rasterizes s via the browser text backend and uploads a per-line
+// GPU texture. Single JS call: JS allocates backend memory, draws, returns ptr.
 func (srv *textServer) shapeLine(f *fontEntry, s string, pxSize int32) (*cachedLine, error) {
 	h, err := srv.ensureHandle(f, pxSize)
 	if err != nil {
 		return nil, err
 	}
-	pixels, bitmap, ok := srv.b.TextRasterLineRGBA8(h, s)
-	if !ok {
-		return nil, fmt.Errorf("text: run raster failed")
+	bitmap, err := srv.rasterLine(h, s)
+	if err != nil {
+		return nil, err
+	}
+	return srv.buildCachedLine(bitmap)
+}
+
+// shapeVolatileLine attempts to reuse prev's texture handle when the new run
+// raster has the same dimensions (fast typing path).
+func (srv *textServer) shapeVolatileLine(f *fontEntry, owner uint32, s string, pxSize int32, prev *cachedLine) (*cachedLine, error) {
+	_ = owner
+	h, err := srv.ensureHandle(f, pxSize)
+	if err != nil {
+		return nil, err
+	}
+	bitmap, err := srv.rasterLine(h, s)
+	if err != nil {
+		return nil, err
 	}
 	if bitmap.WidthPx <= 0 || bitmap.HeightPx <= 0 {
+		if bitmap.PixelsPtr != 0 {
+			srv.b.Free(bitmap.PixelsPtr)
+		}
 		return &cachedLine{img: -1, samp: srv.plat.sampler}, nil
 	}
-	cropped, ow, oh := cropAlphaBounds(pixels, bitmap.WidthPx, bitmap.HeightPx)
-	if ow <= 0 || oh <= 0 {
-		return &cachedLine{img: -1, samp: srv.plat.sampler}, nil
+	numBytes := bitmap.WidthPx * bitmap.HeightPx * 4
+	defer srv.b.Free(bitmap.PixelsPtr)
+
+	// Reuse existing image handle when dimensions match (avoids GPU alloc).
+	if prev != nil && prev.perLineImg && prev.img >= 0 && len(prev.glyphs) > 0 &&
+		prev.glyphs[0].Dst.W == bitmap.WidthPx && prev.glyphs[0].Dst.H == bitmap.HeightPx {
+		srv.b.ImageUpdateRGBA8BackendPtr(prev.img, bitmap.WidthPx, bitmap.HeightPx, bitmap.PixelsPtr, numBytes)
+		return prev, nil
 	}
-	img := srv.b.ImageCreateTexture(ow, oh, shader.PixfmtRGBA8)
+
+	img := srv.b.ImageCreateTexture(bitmap.WidthPx, bitmap.HeightPx, shader.PixfmtRGBA8)
 	if img < 0 {
 		return nil, fmt.Errorf("text: line texture create failed")
 	}
-	srv.b.ImageUpdateRGBA8(img, ow, oh, unsafe.Pointer(&cropped[0]), int32(len(cropped)))
+	srv.b.ImageUpdateRGBA8BackendPtr(img, bitmap.WidthPx, bitmap.HeightPx, bitmap.PixelsPtr, numBytes)
 	return &cachedLine{
 		img:  img,
 		samp: srv.plat.sampler,
 		glyphs: []lineQuad{{
-			Dst: emath.Rect{X: 0, Y: 0, W: ow, H: oh},
+			Dst: emath.Rect{X: 0, Y: 0, W: bitmap.WidthPx, H: bitmap.HeightPx},
 			UV:  emath.UVRect{U0: 0, V0: 0, U1: 1, V1: 1},
 		}},
-		size:       emath.Vec2{float32(ow), float32(oh)},
+		size:       emath.Vec2{float32(bitmap.WidthPx), float32(bitmap.HeightPx)},
 		perLineImg: true,
 	}, nil
 }
@@ -74,45 +134,4 @@ func (srv *textServer) destroyLine(line *cachedLine) {
 	}
 	srv.b.ImageDestroy(line.img)
 	line.img = -1
-}
-
-// cropAlphaBounds trims transparent borders from an RGBA8 raster so the GPU
-// texture and draw quad don't include large empty margins.
-func cropAlphaBounds(pixels []byte, w, h int32) ([]byte, int32, int32) {
-	if w <= 0 || h <= 0 || len(pixels) < int(w*h*4) {
-		return nil, 0, 0
-	}
-	const thresh = 8
-	minX, minY := w, h
-	maxX, maxY := int32(-1), int32(-1)
-	for yy := int32(0); yy < h; yy++ {
-		for xx := int32(0); xx < w; xx++ {
-			if pixels[(yy*w+xx)*4+3] > thresh {
-				if xx < minX {
-					minX = xx
-				}
-				if yy < minY {
-					minY = yy
-				}
-				if xx > maxX {
-					maxX = xx
-				}
-				if yy > maxY {
-					maxY = yy
-				}
-			}
-		}
-	}
-	if maxX < minX || minX >= w || minY >= h {
-		return nil, 0, 0
-	}
-	ow := maxX - minX + 1
-	oh := maxY - minY + 1
-	out := make([]byte, ow*oh*4)
-	for yy := int32(0); yy < oh; yy++ {
-		srcOff := int(((minY+yy)*w + minX) * 4)
-		dstOff := int(yy * ow * 4)
-		copy(out[dstOff:dstOff+int(ow)*4], pixels[srcOff:srcOff+int(ow)*4])
-	}
-	return out, ow, oh
 }

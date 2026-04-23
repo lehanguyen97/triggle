@@ -11,7 +11,11 @@ import "C"
 import "unsafe"
 
 // BackendHost (native) exposes the full HB+FT text pipeline in addition to the
-// shared GPU APIs. No DOM text-input overlay on native.
+// shared GPU APIs. The cross-platform `Backend.TextInput*` methods (Begin/End/
+// Poll) are implemented as no-ops here — sokol has no platform IME surface and
+// the widget owns its buffer; SDL3 will fill them in when the host swaps. See
+// host_wasm.go for the DOM-backed implementation and ai/text-input.md for the
+// rationale.
 type BackendHost struct {
 	Init    func() int32
 	Cleanup func(e int32) int32
@@ -234,4 +238,23 @@ func (e Backend) TextRasterGlyphRGBA8(font int32, glyphID uint32) ([]byte, TextG
 		return nil, TextGlyphBitmap{}, false
 	}
 	return pixels, bitmap, true
+}
+
+// TextInputBegin / TextInputEnd / TextInputPoll: cross-platform shims for the
+// host-owned text-input session. Native (sokol today) has no platform IME
+// surface — the widget owns its buffer and edits from KeyEvents+Text. These
+// stubs let engine/ui call the same API on both platforms; SDL3 will fill them
+// in (SDL_StartTextInput / SDL_StopTextInput / SDL_SetTextInputArea +
+// SDL_EVENT_TEXT_EDITING). See host_wasm.go for the DOM-backed implementation.
+func (e Backend) TextInputBegin(x, y, w, h int32, utf8 []byte, caretBytes int32) {
+	_, _, _, _, _, _ = x, y, w, h, utf8, caretBytes
+}
+
+func (e Backend) TextInputEnd() {}
+
+// TextInputPoll returns -1 to signal "host has nothing to report"; the caller
+// (engine/ui) treats that as "widget keeps its own buffer".
+func (e Backend) TextInputPoll(outBuf []byte, outCaret *int32) int32 {
+	_, _ = outBuf, outCaret
+	return -1
 }

@@ -38,14 +38,17 @@ func (g *Game) buildUI() {
 	if g.uiCtx == nil {
 		return
 	}
-	if g.uiCtx.BeginWindow("Log",
-		emath.Rect{X: 10, Y: 10, W: 360, H: 220},
-		ui.WindowNoResize|ui.WindowNoClose) {
+	// One window, vertically stacked widgets. The pen inside BeginWindow
+	// drives layout; WindowAutoSizeY makes the frame fit its contents.
+	flags := ui.WindowNoResize | ui.WindowNoClose | ui.WindowAutoSizeY
+	if g.uiCtx.BeginWindow("HUD", emath.Rect{X: 10, Y: 10, W: 360}, flags) {
 		g.uiCtx.LogView(g.logBuf, ui.LogViewOpt{
 			MaxVisible: 12,
 			AutoScroll: true,
 			Color:      cmd.Color{R: 235, G: 235, B: 240, A: 255},
 		})
+		g.uiCtx.TextInput("name", ui.TextInputOpt{Initial: "hello", MaxBytes: 128})
+		g.uiCtx.TextInput("message", ui.TextInputOpt{Initial: "message", MaxBytes: 128})
 		g.uiCtx.EndWindow()
 	}
 }

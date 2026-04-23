@@ -94,3 +94,21 @@ func (f *Font) Draw(sink QuadSink, s string, x, y, pixelSize int32, color Color)
 	}
 	f.srv.draw(f.id, s, x, y, pixelSize, color, sink)
 }
+
+// DrawVolatile draws s without inserting it into the shared shaped-line cache.
+// Intended for rapidly-changing UI text (e.g. active text inputs). The server
+// keeps only the latest run per owner and destroys the previous one on change.
+func (f *Font) DrawVolatile(sink QuadSink, owner uint32, s string, x, y, pixelSize int32, color Color) {
+	if f == nil || f.srv == nil || sink == nil || s == "" || owner == 0 {
+		return
+	}
+	f.srv.drawVolatile(f.id, owner, s, x, y, pixelSize, color, sink)
+}
+
+// DropVolatile releases any volatile cached line(s) owned by owner.
+func (f *Font) DropVolatile(owner uint32) {
+	if f == nil || f.srv == nil || owner == 0 {
+		return
+	}
+	f.srv.dropVolatile(owner)
+}

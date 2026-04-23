@@ -155,3 +155,29 @@ func (e *Encoder) Commands() []UICmd {
 	}
 	return e.cmds
 }
+
+// CmdIndex returns the index of the next command to be appended. Pair with
+// PatchRect to fix up Rect after the size is known (used by auto-sized
+// windows: emit bg quad + clip push at Begin with placeholder rects, patch
+// at End once the content's measured height is in).
+func (e *Encoder) CmdIndex() int {
+	if e == nil {
+		return 0
+	}
+	return len(e.cmds)
+}
+
+// PatchRect overwrites the Rect of a previously-emitted command (Quad or
+// ClipPush). Out-of-range or wrong-kind indices are ignored. Does NOT touch
+// the encoder's clip stack — callers patching ClipPush must keep the stack
+// shape unchanged (only the rect dims can move).
+func (e *Encoder) PatchRect(idx int, r emath.Rect) {
+	if e == nil || idx < 0 || idx >= len(e.cmds) {
+		return
+	}
+	c := &e.cmds[idx]
+	switch c.Kind {
+	case CmdQuad, CmdClipPush:
+		c.Rect = r
+	}
+}

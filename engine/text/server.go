@@ -73,6 +73,14 @@ type lineKey struct {
 	content string
 }
 
+// volatileKey identifies a volatile shaped line (not part of the shared LRU).
+// Owner is an app-supplied stable id (e.g. a widget id).
+type volatileKey struct {
+	owner  uint32
+	fontID int32
+	pxSize int32
+}
+
 // lineQuad is one glyph (or whole-line on WASM) quad in local pixel space.
 type lineQuad struct {
 	Dst emath.Rect
@@ -99,17 +107,21 @@ type textServer struct {
 	fonts  map[int32]*fontEntry
 	lines  map[lineKey]*list.Element
 	lru    *list.List
+	// Volatile lines are kept out of the shared cache so rapidly-changing strings
+	// (e.g. text input) don't evict stable UI text.
+	volatile map[volatileKey]*cachedLine
 
 	plat platState // per-platform: atlas (native) or sampler (wasm)
 }
 
 func newServer(b backend.Backend) (*textServer, error) {
 	srv := &textServer{
-		b:      b,
-		nextID: 1,
-		fonts:  make(map[int32]*fontEntry),
-		lines:  make(map[lineKey]*list.Element),
-		lru:    list.New(),
+		b:        b,
+		nextID:   1,
+		fonts:    make(map[int32]*fontEntry),
+		lines:    make(map[lineKey]*list.Element),
+		lru:      list.New(),
+		volatile: make(map[volatileKey]*cachedLine),
 	}
 	plat, err := initPlat(b)
 	if err != nil {
@@ -123,6 +135,10 @@ func (srv *textServer) close() {
 	for el := srv.lru.Front(); el != nil; el = el.Next() {
 		srv.destroyLine(el.Value.(*cachedLine))
 	}
+	for _, line := range srv.volatile {
+		srv.destroyLine(line)
+	}
+	srv.volatile = nil
 	srv.lines = nil
 	srv.lru.Init()
 	for _, f := range srv.fonts {
@@ -152,6 +168,12 @@ func (srv *textServer) closeFont(fontID int32) {
 		return
 	}
 	srv.evictByFont(fontID)
+	for k, line := range srv.volatile {
+		if k.fontID == fontID {
+			srv.destroyLine(line)
+			delete(srv.volatile, k)
+		}
+	}
 	for _, h := range f.handles {
 		srv.b.TextFontClose(h)
 	}
@@ -212,6 +234,14 @@ func (srv *textServer) measure(fontID int32, s string, pxSize int32) emath.Vec2 
 	if !ok {
 		return emath.Vec2{}
 	}
+	// Hot path: caret-prefix Measure on the focused text-input runs every
+	// blink frame. If the same string was just shaped by getLine, its cached
+	// size is already on the cachedLine — reuse it instead of re-crossing
+	// HarfBuzz (native) or the JS Canvas measureText (WASM).
+	if el, ok := srv.lines[lineKey{fontID: fontID, pxSize: pxSize, content: s}]; ok {
+		srv.lru.MoveToFront(el)
+		return el.Value.(*cachedLine).size
+	}
 	h, err := srv.ensureHandle(f, pxSize)
 	if err != nil {
 		return emath.Vec2{}
@@ -240,6 +270,35 @@ func (srv *textServer) draw(fontID int32, s string, x, y, pxSize int32, color Co
 	}
 }
 
+func (srv *textServer) drawVolatile(fontID int32, owner uint32, s string, x, y, pxSize int32, color Color, sink QuadSink) {
+	f, ok := srv.fonts[fontID]
+	if !ok {
+		return
+	}
+	line, err := srv.getVolatileLine(f, owner, s, pxSize)
+	if err != nil || line == nil {
+		return
+	}
+	for _, g := range line.glyphs {
+		d := g.Dst
+		d.X += x
+		d.Y += y
+		sink.AddTexturedQuad(line.img, line.samp, d, g.UV, color)
+	}
+}
+
+func (srv *textServer) dropVolatile(owner uint32) {
+	if srv == nil || owner == 0 || srv.volatile == nil {
+		return
+	}
+	for k, line := range srv.volatile {
+		if k.owner == owner {
+			srv.destroyLine(line)
+			delete(srv.volatile, k)
+		}
+	}
+}
+
 // getLine returns a cached line for (font, pxSize, s), shaping on miss and
 // evicting the LRU tail when the cache overflows.
 func (srv *textServer) getLine(f *fontEntry, s string, pxSize int32) (*cachedLine, error) {
@@ -262,5 +321,37 @@ func (srv *textServer) getLine(f *fontEntry, s string, pxSize int32) (*cachedLin
 		delete(srv.lines, tl.key)
 		srv.destroyLine(tl)
 	}
+	return line, nil
+}
+
+// getVolatileLine returns the latest shaped line for (owner,font,pxSize). The
+// line is not inserted into the shared LRU; on content change, the previous
+// line is destroyed immediately and replaced.
+func (srv *textServer) getVolatileLine(f *fontEntry, owner uint32, s string, pxSize int32) (*cachedLine, error) {
+	if srv.volatile == nil {
+		srv.volatile = make(map[volatileKey]*cachedLine)
+	}
+	k := volatileKey{owner: owner, fontID: f.id, pxSize: pxSize}
+	old := srv.volatile[k]
+	if old != nil && old.key.content == s {
+		return old, nil
+	}
+	line, err := srv.shapeVolatileLine(f, owner, s, pxSize, old)
+	if err != nil {
+		// Keep the previous line (if any) rather than flickering the widget.
+		return old, nil
+	}
+	if line == nil {
+		if old != nil {
+			srv.destroyLine(old)
+		}
+		delete(srv.volatile, k)
+		return nil, nil
+	}
+	line.key = lineKey{fontID: f.id, pxSize: pxSize, content: s}
+	if old != nil && old != line && old.img != line.img {
+		srv.destroyLine(old)
+	}
+	srv.volatile[k] = line
 	return line, nil
 }

@@ -141,7 +141,10 @@ func (a *glyphAtlas) shapeRun(h int32, s string, ascentPx int32) ([]lineQuad, em
 	}
 	var out []lineQuad
 	penX := int32(0)
-	atlasF := a.atlasSize
+	// Convert to float ONCE; UV math must run in float space — the original
+	// `entry.x / atlasF` was int32 division and collapsed to 0 for every
+	// glyph (entry.x < atlasSize), making every quad sample atlas pixel (0,0).
+	atlasF := float32(a.atlasSize)
 	for _, glyph := range shaped {
 		entry, err := a.ensureGlyph(h, glyph.GlyphID)
 		if err != nil {
@@ -159,10 +162,10 @@ func (a *glyphAtlas) shapeRun(h int32, s string, ascentPx int32) ([]lineQuad, em
 		out = append(out, lineQuad{
 			Dst: emath.Rect{X: x0, Y: y0, W: w, H: hgt},
 			UV: emath.UVRect{
-				U0: float32(entry.x / atlasF),
-				V0: float32(entry.y / atlasF),
-				U1: float32(entry.x + entry.bitmap.WidthPx/atlasF),
-				V1: float32(entry.y + entry.bitmap.HeightPx/atlasF),
+				U0: float32(entry.x) / atlasF,
+				V0: float32(entry.y) / atlasF,
+				U1: float32(entry.x+entry.bitmap.WidthPx) / atlasF,
+				V1: float32(entry.y+entry.bitmap.HeightPx) / atlasF,
 			},
 		})
 		penX += glyph.XAdvance26_6

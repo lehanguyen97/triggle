@@ -4,8 +4,8 @@ package backend
 
 import "unsafe"
 
-// BackendHost (WASM) exposes the browser whole-line raster and (in a follow-up
-// commit) a DOM text-input overlay. No per-glyph shaping on this path.
+// BackendHost (WASM) exposes the browser whole-line raster and the DOM-backed
+// text-input overlay (TextInput.Begin/End/Poll). No per-glyph shaping on this path.
 type BackendHost struct {
 	Init    func() int32
 	Cleanup func(e int32) int32
@@ -54,11 +54,27 @@ type BackendHost struct {
 
 	// Text: browser subset — font lifecycle + whole-line raster (no per-glyph shaping).
 	Text struct {
-		FontOpen        func(e int32, path Ptr, pathLen, ptSize int32) int32
-		FontClose       func(e int32, font int32)
-		FontGetMetrics  func(e int32, font int32, out Ptr) int32
-		MeasureUTF8     func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
-		RasterLineRGBA8 func(e int32, font int32, utf8 Ptr, utf8Len int32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32
+		FontOpen             func(e int32, path Ptr, pathLen, ptSize int32) int32
+		FontClose            func(e int32, font int32)
+		FontGetMetrics       func(e int32, font int32, out Ptr) int32
+		MeasureUTF8          func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32
+		RasterAllocLineRGBA8 func(e int32, font int32, utf8 Ptr, utf8Len int32, outBitmap Ptr) int32
+	}
+
+	// TextInput: host-owned text-input session. WASM backs this with a hidden
+	// <input> overlay that captures keys, IME, clipboard, and a11y for free;
+	// future SDL3 native will back it with SDL_StartTextInput +
+	// SDL_SetTextInputArea (sokol native today: no-op stubs in host_native.go).
+	// Naming follows SDL3 (Begin/End/Poll); see ai/text-input.md.
+	//   Begin: position the input area at (rect), seed value + caret, activate.
+	//          Caller invokes once on the focus-grant transition.
+	//   End:   deactivate (blur on WASM; SDL_StopTextInput on SDL3).
+	//   Poll:  read current value (UTF-8) into outBuf; write UTF-8 caret byte offset to outCaret.
+	//          Returns number of UTF-8 bytes in the value (may exceed bufCap; caller retries), -1 on error.
+	TextInput struct {
+		Begin func(rectX, rectY, rectW, rectH int32, utf8 Ptr, utf8Len int32, caretBytes int32)
+		End   func()
+		Poll  func(outBuf Ptr, bufCap int32, outCaret Ptr) int32
 	}
 
 	Pass struct {
@@ -147,8 +163,17 @@ func _backend_text_font_get_metrics(e int32, font int32, out uint32) int32
 //go:wasmimport env backend_text_measure_utf8
 func _backend_text_measure_utf8(e int32, font int32, utf8 uint32, utf8Len int32, outMeasure uint32) int32
 
-//go:wasmimport env backend_text_raster_utf8_rgba8
-func _backend_text_raster_utf8_rgba8(e int32, font int32, utf8 uint32, utf8Len int32, outPixels uint32, pixelCap int32, outBitmap uint32) int32
+//go:wasmimport env backend_text_raster_alloc_utf8_rgba8_backend
+func _backend_text_raster_alloc_utf8_rgba8_backend(e int32, font int32, utf8 uint32, utf8Len int32, outBitmap uint32) int32
+
+//go:wasmimport env backend_text_input_begin
+func _backend_text_input_begin(x int32, y int32, w int32, h int32, utf8 uint32, utf8Len int32, caretBytes int32)
+
+//go:wasmimport env backend_text_input_end
+func _backend_text_input_end()
+
+//go:wasmimport env backend_text_input_poll
+func _backend_text_input_poll(outBuf uint32, bufCap int32, outCaret uint32) int32
 
 //go:wasmimport env backend_pass_create
 func _backend_pass_create(e int32, color int32, depth int32) int32
@@ -228,8 +253,16 @@ func init() {
 	Host.Text.MeasureUTF8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outMeasure Ptr) int32 {
 		return _backend_text_measure_utf8(e, font, uint32(utf8), utf8Len, uint32(outMeasure))
 	}
-	Host.Text.RasterLineRGBA8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outPixels Ptr, pixelCap int32, outBitmap Ptr) int32 {
-		return _backend_text_raster_utf8_rgba8(e, font, uint32(utf8), utf8Len, uint32(outPixels), pixelCap, uint32(outBitmap))
+	Host.Text.RasterAllocLineRGBA8 = func(e int32, font int32, utf8 Ptr, utf8Len int32, outBitmap Ptr) int32 {
+		return _backend_text_raster_alloc_utf8_rgba8_backend(e, font, uint32(utf8), utf8Len, uint32(outBitmap))
+	}
+
+	Host.TextInput.Begin = func(x, y, w, h int32, utf8 Ptr, utf8Len, caretBytes int32) {
+		_backend_text_input_begin(x, y, w, h, uint32(utf8), utf8Len, caretBytes)
+	}
+	Host.TextInput.End = func() { _backend_text_input_end() }
+	Host.TextInput.Poll = func(outBuf Ptr, bufCap int32, outCaret Ptr) int32 {
+		return _backend_text_input_poll(uint32(outBuf), bufCap, uint32(outCaret))
 	}
 
 	Host.Pass.Create = func(e int32, color, depth int32) int32 {
@@ -240,35 +273,60 @@ func init() {
 	}
 }
 
-// TextRasterLineRGBA8 rasterizes a full UTF-8 run to RGBA8 using the browser
-// text backend (WASM-only; native has no run raster).
-func (e Backend) TextRasterLineRGBA8(font int32, utf8 string) ([]byte, TextRunBitmap, bool) {
+// TextInputBegin activates a host-owned text-input session bound to the rect
+// (x,y,w,h) in CSS logical pixels (high_dpi is not set; framebuffer coords ==
+// CSS px), seeded with utf8 value + caret byte offset.
+// WASM: positions the hidden <input> overlay and focuses it.
+// Called once per focus-grant transition; idempotent re-calls reposition.
+func (e Backend) TextInputBegin(x, y, w, h int32, utf8 []byte, caretBytes int32) {
+	var p Ptr
+	var n int32
+	if len(utf8) > 0 {
+		p = Ptr(uintptr(unsafe.Pointer(&utf8[0])))
+		n = int32(len(utf8))
+	}
+	Host.TextInput.Begin(x, y, w, h, p, n, caretBytes)
+}
+
+// TextInputEnd deactivates the host text-input session.
+// WASM: blurs the hidden overlay.
+func (e Backend) TextInputEnd() { Host.TextInput.End() }
+
+// TextInputPoll copies the host's current value into outBuf (UTF-8, up to cap
+// bytes) and writes the caret UTF-8 byte offset to outCaret. Returns total
+// UTF-8 byte length of the value (may exceed cap). -1 on error or when the
+// host has nothing to report (e.g. native, where the widget owns its buffer).
+func (e Backend) TextInputPoll(outBuf []byte, outCaret *int32) int32 {
+	var bufPtr Ptr
+	var cap32 int32
+	if len(outBuf) > 0 {
+		bufPtr = Ptr(uintptr(unsafe.Pointer(&outBuf[0])))
+		cap32 = int32(len(outBuf))
+	}
+	return Host.TextInput.Poll(bufPtr, cap32, Ptr(uintptr(unsafe.Pointer(outCaret))))
+}
+
+// ImageUpdateRGBA8BackendPtr updates an RGBA8 texture from a pointer in backend WASM memory.
+// This avoids the BulkCopy allocation+copy used by Backend.ImageUpdateRGBA8.
+func (e Backend) ImageUpdateRGBA8BackendPtr(img, w, h int32, pixels Ptr, numBytes int32) {
+	if numBytes <= 0 || pixels == 0 {
+		return
+	}
+	Host.Image.UpdateRGBA8(e.handle, img, w, h, pixels, numBytes)
+}
+
+// TextRasterAllocLineRGBA8Backend rasterizes a UTF-8 run to RGBA8, allocating the pixel
+// buffer in backend WASM memory via JS. On success, bitmap.PixelsPtr is a backend-memory
+// pointer (non-zero when WidthPx > 0); caller must Free it after uploading to GPU.
+func (e Backend) TextRasterAllocLineRGBA8Backend(font int32, utf8 string) (TextRunBitmap, bool) {
 	var textPtr Ptr
 	textLen := int32(len(utf8))
 	if textLen > 0 {
 		textPtr = Ptr(uintptr(unsafe.Pointer(unsafe.StringData(utf8))))
 	}
 	var bitmap TextRunBitmap
-	if Host.Text.RasterLineRGBA8(e.handle, font, textPtr, textLen, 0, 0, Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
-		return nil, TextRunBitmap{}, false
+	if Host.Text.RasterAllocLineRGBA8(e.handle, font, textPtr, textLen, Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
+		return TextRunBitmap{}, false
 	}
-	if bitmap.WidthPx <= 0 || bitmap.HeightPx <= 0 {
-		return nil, bitmap, true
-	}
-	if bitmap.WidthPx > 4096 || bitmap.HeightPx > 4096 {
-		return nil, TextRunBitmap{}, false
-	}
-	pixelBytes64 := int64(bitmap.WidthPx) * int64(bitmap.HeightPx) * 4
-	if pixelBytes64 <= 0 || pixelBytes64 > 64*1024*1024 {
-		return nil, TextRunBitmap{}, false
-	}
-	pixelBytes := int32(pixelBytes64)
-	pixels := make([]byte, pixelBytes)
-	pixPtr := Ptr(uintptr(unsafe.Pointer(&pixels[0])))
-	if Host.Text.RasterLineRGBA8(e.handle, font, textPtr, textLen,
-		pixPtr, pixelBytes,
-		Ptr(uintptr(unsafe.Pointer(&bitmap)))) != 0 {
-		return nil, TextRunBitmap{}, false
-	}
-	return pixels, bitmap, true
+	return bitmap, true
 }

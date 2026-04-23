@@ -12,11 +12,12 @@ th.BodyPx  = int32(float32(th.BodyPx)  * dpiScale)   // caller applies DPI; engi
 th.TitlePx = int32(float32(th.TitlePx) * dpiScale)
 ctx, _ := ui.NewContext(ui.ContextOptions{Backend: backend, Theme: th, Font: font})
 
-// per frame
+// per frame — auto-sized window with stacked widgets (ImGui-style pen layout)
 ctx.Begin(inputFrame, emath.Rect{W: winW, H: winH}, dt)
-if ctx.BeginWindow("Log", emath.Rect{X: 10, Y: 10, W: 360, H: 220},
-    ui.WindowNoResize|ui.WindowNoClose) {
+flags := ui.WindowNoResize | ui.WindowNoClose | ui.WindowAutoSizeY
+if ctx.BeginWindow("HUD", emath.Rect{X: 10, Y: 10, W: 360}, flags) {
     ctx.LogView(lines, ui.LogViewOpt{MaxVisible: 12, AutoScroll: true})
+    ctx.TextInput("name", ui.TextInputOpt{Initial: "hello", MaxBytes: 128})
     ctx.EndWindow()
 }
 ctx.End()
@@ -54,8 +55,11 @@ func (c *Context) MyWidget(label string) MyResult {
     type mws struct{ Hover, Armed bool }
     ws := StateOf[mws](c, id)
 
-    // 3. Layout — carve from the current container.
-    r := c.ContentRect()
+    // 3. Layout — reserve the next vertical row in the current container.
+    //    The pen advances by h + theme.Spacing automatically; auto-sized
+    //    windows (WindowAutoSizeY) measure their content from these calls.
+    //    Use c.Avail() if you want the remaining slot instead of a row.
+    r := c.LayoutNextRow(rowH)
 
     // 4. Input — MousePressed/Released are edge bits, MouseDown is level.
     mx, my := int32(c.in.MousePos[0]), int32(c.in.MousePos[1])
@@ -85,7 +89,9 @@ func (c *Context) MyWidget(label string) MyResult {
 }
 ```
 
-Container (clips + owns a child layout rect): in `BeginX`, pair `c.pushLayout(inner)` + `c.enc.PushClip(inner)`; in `EndX`, pair `c.enc.PopClip()` + `c.popLayout()` + the idStack pop. See `window.go`.
+Container (clips + owns a child layout rect): in `BeginX`, pair `c.pushLayout(layoutFrame{rect: inner, spacing: c.theme.Spacing})` + `c.enc.PushClip(inner)`; in `EndX`, pair `c.enc.PopClip()` + `c.popLayout()` + the idStack pop. See `window.go`. Container's children call `LayoutNextRow` against the inner frame; `cursorY - startY` is the measured content height for auto-sizing.
+
+Auto-sized container (e.g. `WindowAutoSizeY`): emit bg quad + clip push at Begin with placeholder rects, remember `enc.CmdIndex()` for each. At End, after `popLayout`, compute the measured outer rect and call `enc.PatchRect(idx, rect)` on each placeholder. The encoder's clip stack uses the (loose) intersected rect for child clip pushes during the body — patching the command's `Rect` updates what the renderer sees, not the stack. Fine in practice because well-behaved widgets never draw past the measured `cursorY`.
 
 Custom drawing (timeline, curve, inspector): take `&c.enc` and emit `QuadSolid` / `AddTexturedQuad` / `font.Draw` directly. Hit-test against your own data-coord rects.
 
@@ -97,4 +103,6 @@ Custom drawing (timeline, curve, inspector): take `&c.enc` and emit `QuadSolid` 
 - **Straight alpha, swapchain-native color space.** `SrcAlpha, OneMinusSrcAlpha`, no `pow(2.2)`. Promoting to sRGB or premultiplied is a future milestone, not a local tweak.
 - **`DPIScale` is pre-applied to `Theme.BodyPx`/`TitlePx` by the caller.** Widgets treat `BodyPx` as framebuffer pixels; the engine never multiplies by DPI.
 - **Persistent state lives in `StateOf[T]`.** Widgets are re-entered every frame; locals and return values disappear.
+- **Layout is a vertical pen, ImGui-style.** `LayoutNextRow(h)` reserves a full-width row at `cursorY` and advances by `h`; subsequent rows get `theme.Spacing` between them automatically. `Avail()` returns the remaining slot. Per-widget size helpers (`TextInputHeight`, `LogViewHeight`) exist for callers that still want to size a fixed-rect window, but widgets call `LayoutNextRow` themselves so callers don't have to.
+- **`WindowAutoSizeY` makes the window fit its content.** Caller passes `rect` with `H` omitted; `BeginWindow` emits placeholder bg + clip, `EndWindow` patches them from the measured pen advance. Stash + lookup of last-frame size: `Context.WindowSize(title)` for callers that want to chain sibling windows.
 - **Close order: `Context` before `Font`.** `Context.Close` releases the white texture + state map; `Font.Close` tears down per-size handles (and the shared `textServer` when the last `Font` on that backend closes).

@@ -17,6 +17,7 @@ enum {
   G_EVENT_MOUSE_MOVE = 5,
   G_EVENT_MOUSE_SCROLL = 6,
   G_EVENT_RESIZE = 7,
+  G_EVENT_TEXT = 8,
 };
 
 /* Key codes */
@@ -28,6 +29,15 @@ enum {
   GK_SPACE,
   GK_ESCAPE,
   GK_ENTER,
+  GK_BACKSPACE,
+  GK_DELETE,
+  GK_LEFT,
+  GK_RIGHT,
+  GK_UP,
+  GK_DOWN,
+  GK_HOME,
+  GK_END,
+  GK_TAB,
 };
 
 /* Mouse buttons */
@@ -40,8 +50,13 @@ enum {
 /*
  * Unified event API — always flattened scalars (WASM-compatible).
  *
- * Keyboard: game_event(g, type, keyCode, 0, isRepeat, 0,0,0,0, winW,winH)
- * Mouse:    game_event(g, type, button,  0, 0,        mouseX,mouseY,scrollX,scrollY, winW,winH)
+ * Keyboard: game_event(g, type, keyCode, 0, isRepeatFlags, 0,0,0,0, winW,winH)
+ * Mouse:    game_event(g, type, button,  mods, 0,          mouseX,mouseY,scrollX,scrollY, winW,winH)
+ * Text:     game_event(g, G_EVENT_TEXT, codepoint, 0, 0, 0,0,0,0, winW,winH)
+ *
+ * isRepeatFlags layout (keyboard):
+ *   bit    0: key repeat flag
+ *   bits 8..11: Shift/Ctrl/Alt/Cmd (in that order); host collapses L/R into single bits.
  */
 
 /*

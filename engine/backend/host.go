@@ -60,11 +60,13 @@ type TextMeasure struct {
 }
 
 // TextRunBitmap is the browser-only whole-line run raster bitmap (WASM path only).
+// PixelsPtr is a backend-memory pointer allocated by JS; caller must Free it after upload.
 type TextRunBitmap struct {
 	WidthPx     int32
 	HeightPx    int32
 	BaselinePx  int32
 	StrideBytes int32
+	PixelsPtr   Ptr // backend-memory ptr; 0 if empty
 }
 
 func NewBackend() Backend {

@@ -52,6 +52,13 @@ func (srv *textServer) shapeLine(f *fontEntry, s string, pxSize int32) (*cachedL
 	}, nil
 }
 
+// shapeVolatileLine is the volatile-cache variant of shapeLine. On native there
+// is no per-line resource to reuse, so it delegates to shapeLine.
+func (srv *textServer) shapeVolatileLine(f *fontEntry, owner uint32, s string, pxSize int32, prev *cachedLine) (*cachedLine, error) {
+	_, _ = owner, prev
+	return srv.shapeLine(f, s, pxSize)
+}
+
 // destroyLine: native cached lines reference the shared atlas, so there's
 // nothing per-line to free; the atlas lives for the whole server lifetime.
 func (srv *textServer) destroyLine(_ *cachedLine) {}
