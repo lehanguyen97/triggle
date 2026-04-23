@@ -73,7 +73,7 @@ func appendUIQuad(verts *[]float32, indices *[]uint16,
 
 // EmitUI encodes UI draws into the forward command buffer (single mesh, batched by texture binding + scissor).
 func (p *UIProgram) EmitUI(r *ForwardRenderer, cmds []uicmd.UICmd, bindings []ui.TextureBinding, vpW, vpH int32) {
-	if p == nil || r == nil || vpW <= 0 || vpH <= 0 {
+	if vpW <= 0 || vpH <= 0 {
 		return
 	}
 	if len(cmds) == 0 {

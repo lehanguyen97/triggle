@@ -6,217 +6,164 @@ import (
 	"triggle/engine/ui/theme"
 )
 
-// WindowOpt are bit flags for BeginWindow.
-type WindowOpt uint32
+// Window is a titled, draggable container with a padded content area.
+type Window struct {
+	BaseNode
+	parent Node
+	Title  string
+	Pos    emath.Vec2
+	Width  int32   // 0 = shrink to child
+	Child  Node
+	Flags  WindowOpt
 
-const (
-	WindowNoTitle WindowOpt = 1 << iota
-	WindowNoFrame
-	WindowNoResize
-	WindowNoClose
-	// WindowAutoSizeY ignores rect.H and grows the window to fit the
-	// vertical pen at EndWindow. Mirrors ImGui's AlwaysAutoResize on Y.
-	WindowAutoSizeY
-	// WindowAutoSizeW ignores rect.W and grows the window to fit the
-	// widest reserved row at EndWindow.
-	WindowAutoSizeW
-)
+	Dragging   bool
+	grabX, grabY int32
 
-type windowState struct {
-	PosX        int32
-	PosY        int32
-	GrabOffX    int32
-	GrabOffY    int32
-	Dragging    bool
-	Initialized bool
-	// LastOuterH/W is the rect we ended with last frame (post-autosize).
-	// Tools that stack windows can read it via Context.WindowSize(title).
-	LastOuterH int32
-	LastOuterW int32
+	outerSize Size
+	lastChild Size
 }
 
-func (c *Context) emitWindowTitle(_ WidgetID, title string, win emath.Rect, titleH int32) {
-	if c == nil || c.font == nil || title == "" {
+// Children implements Node.
+func (w *Window) Children() []Node {
+	if w.Child == nil {
+		return nil
+	}
+	return []Node{w.Child}
+}
+
+func (w *Window) titleHeight() int32 {
+	if w.app == nil {
+		return 0
+	}
+	if w.Flags&WindowNoTitle != 0 {
+		return 0
+	}
+	return w.app.theme.TitleHeight
+}
+
+// titleBarRect returns the title bar in absolute coords, if any.
+func (w *Window) titleBarRect() (x, y, th int32, ok bool) {
+	th = w.titleHeight()
+	if th == 0 {
+		return 0, 0, 0, false
+	}
+	return w.rect.X, w.rect.Y, th, true
+}
+
+// Measure implements Node.
+func (w *Window) Measure(c Constraints) Size {
+	if w.app == nil {
+		return Size{}
+	}
+	cn := normConstraints(c)
+	pad := w.app.theme.Padding
+	th := w.titleHeight()
+	maxInnerW := cn.MaxW - pad.Left - pad.Right
+	if maxInnerW < 0 {
+		maxInnerW = 0
+	}
+	if w.Width > 0 {
+		maxInnerW = w.Width - pad.Left - pad.Right
+		if maxInnerW < 0 {
+			maxInnerW = 0
+		}
+	}
+	innerH := cn.MaxH - th - pad.Top - pad.Bottom
+	if innerH < 0 {
+		innerH = 0
+	}
+	var chSize Size
+	if w.Child != nil {
+		chSize = w.Child.Measure(Constraints{MaxW: maxInnerW, MinW: 0, MaxH: innerH, MinH: 0})
+	}
+	w.lastChild = chSize
+	outerW := w.Width
+	if outerW == 0 {
+		outerW = chSize.W + pad.Left + pad.Right
+	}
+	outerH := th + pad.Top + chSize.H + pad.Bottom
+	w.outerSize = Size{W: outerW, H: outerH}
+	return w.outerSize
+}
+
+// Place implements Node. Root passes viewport; window uses Pos for (X,Y).
+func (w *Window) Place(outer emath.Rect) {
+	w.rect = emath.Rect{
+		X: int32(w.Pos[0]), Y: int32(w.Pos[1]),
+		W: w.outerSize.W, H: w.outerSize.H,
+	}
+	if w.app == nil {
 		return
 	}
-	px := c.theme.TitlePx
+	pad := w.app.theme.Padding
+	th := w.titleHeight()
+	if w.Child != nil {
+		content := emath.Rect{
+			X: w.rect.X + pad.Left,
+			Y: w.rect.Y + th + pad.Top,
+			W: w.rect.W - pad.Left - pad.Right,
+			H: w.lastChild.H,
+		}
+		if content.W < 0 {
+			content.W = 0
+		}
+		if content.H < 0 {
+			content.H = 0
+		}
+		w.Child.Place(content)
+	}
+}
+
+// Paint implements Node.
+func (w *Window) Paint(pc *PaintCtx) {
+	if w.app == nil {
+		return
+	}
+	if w.Flags&WindowNoFrame == 0 {
+		pc.Enc.QuadSolid(w.rect, w.app.theme.Colors[theme.ColorWindowBG])
+	}
+	th := w.titleHeight()
+	if th > 0 {
+		tb := emath.Rect{X: w.rect.X, Y: w.rect.Y, W: w.rect.W, H: th}
+		pc.Enc.QuadSolid(tb, w.app.theme.Colors[theme.ColorTitleBG])
+		w.drawTitle(pc, w.rect, th)
+	}
+	pad := w.app.theme.Padding
+	clipH := w.rect.H - th - pad.Top - pad.Bottom
+	if clipH < 0 {
+		clipH = 0
+	}
+	clipR := emath.Rect{
+		X: w.rect.X + pad.Left,
+		Y: w.rect.Y + th + pad.Top,
+		W: w.rect.W - pad.Left - pad.Right,
+		H: clipH,
+	}
+	pc.Enc.PushClip(clipR)
+	if w.Child != nil {
+		w.Child.Paint(pc)
+	}
+	pc.Enc.PopClip()
+}
+
+func (w *Window) drawTitle(pc *PaintCtx, win emath.Rect, titleH int32) {
+	if w.Title == "" || pc.Font == nil {
+		return
+	}
+	th := w.app.theme
+	px := th.TitlePx
 	tx := win.X + 6
 	ty := win.Y + titleH/2
-	sz := c.font.Measure(title, px)
+	sz := pc.Font.Measure(w.Title, px)
 	if sz[1] > 0 {
 		ty -= int32(sz[1] * 0.5)
 	} else {
-		ty -= c.font.Metrics(px).Ascent / 2
+		ty -= pc.Font.Metrics(px).Ascent / 2
 	}
-	col := c.theme.Colors[theme.ColorTitleText]
-	c.font.Draw(&c.enc, title, tx, ty, px,
+	col := th.Colors[theme.ColorTitleText]
+	pc.Font.Draw(pc.Enc, w.Title, tx, ty, px,
 		text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
 }
 
-// BeginWindow opens a draggable window with title bar and clips content to
-// the client area.
-//
-// When opt has WindowAutoSizeY the rect.H is ignored: BeginWindow emits the
-// bg quad and clip push with placeholder Y-extents, EndWindow patches them
-// to the measured cursor + bottom padding. Width is always taken from rect.W
-// (auto-W isn't supported).
-func (c *Context) BeginWindow(title string, rect emath.Rect, opt WindowOpt) bool {
-	if c == nil {
-		return false
-	}
-	c.idStack = append(c.idStack, "win:"+title)
-	id := c.hashID()
-	ws := StateOf[windowState](c, id)
-	if !ws.Initialized {
-		ws.PosX = rect.X
-		ws.PosY = rect.Y
-		ws.Initialized = true
-	}
-
-	titleH := int32(0)
-	if opt&WindowNoTitle == 0 {
-		titleH = c.theme.TitleHeight
-	}
-
-	pad := c.theme.Padding
-	autoH := opt&WindowAutoSizeY != 0
-
-	// Provisional outer rect — H gets patched at End for autoH. Use a
-	// minimal placeholder height (chrome + 1px) so a one-frame flash
-	// doesn't show a giant box if patching is somehow skipped.
-	outerH := rect.H
-	if autoH {
-		outerH = titleH + pad.Top + pad.Bottom
-	}
-	win := emath.Rect{X: ws.PosX, Y: ws.PosY, W: rect.W, H: outerH}
-	titleBar := emath.Rect{X: win.X, Y: win.Y, W: win.W, H: titleH}
-
-	mx, my := int32(c.in.MousePos[0]), int32(c.in.MousePos[1])
-	if win.Contains(mx, my) || ws.Dragging {
-		c.MarkHover()
-	}
-
-	if opt&WindowNoTitle == 0 {
-		if titleBar.Contains(mx, my) && c.in.MousePressed&MouseLeft != 0 {
-			ws.Dragging = true
-			ws.GrabOffX = mx - ws.PosX
-			ws.GrabOffY = my - ws.PosY
-			c.SetActive(id)
-		}
-		if ws.Dragging && c.in.MouseDown&MouseLeft != 0 {
-			ws.PosX = mx - ws.GrabOffX
-			ws.PosY = my - ws.GrabOffY
-			win.X = ws.PosX
-			win.Y = ws.PosY
-			titleBar.X = win.X
-			titleBar.Y = win.Y
-		}
-		if c.in.MouseReleased&MouseLeft != 0 {
-			ws.Dragging = false
-			c.ClearActive(id)
-		}
-	}
-
-	bgIdx := -1
-	if opt&WindowNoFrame == 0 {
-		bgIdx = c.enc.CmdIndex()
-		c.enc.QuadSolid(win, c.theme.Colors[theme.ColorWindowBG])
-	}
-
-	if opt&WindowNoTitle == 0 {
-		c.enc.QuadSolid(titleBar, c.theme.Colors[theme.ColorTitleBG])
-		c.emitWindowTitle(id, title, win, titleH)
-	}
-
-	contentW := win.W - pad.Left - pad.Right
-	contentY := win.Y + titleH + pad.Top
-	contentH := win.H - titleH - pad.Top - pad.Bottom
-	if autoH {
-		contentH = 1<<30 // pen extends; gets clipped by patched clipCmd at End.
-	}
-	content := emath.Rect{
-		X: win.X + pad.Left,
-		Y: contentY,
-		W: contentW,
-		H: contentH,
-	}
-
-	clipIdx := c.enc.CmdIndex()
-	c.enc.PushClip(content)
-
-	c.pushLayout(layoutFrame{
-		rect:    content,
-		spacing: c.theme.Spacing,
-		autoH:   autoH,
-		bgCmd:   bgIdx,
-		clipCmd: clipIdx,
-		winX:    win.X,
-		winY:    win.Y,
-		winW:    win.W,
-		titleH:  titleH,
-		padBot:  pad.Bottom,
-	})
-	return true
-}
-
-// EndWindow closes the innermost window from BeginWindow. For auto-sized
-// windows, rewrites the bg quad and clip push to the measured outer rect
-// and stashes the result on windowState so callers can stack the next
-// window via Context.WindowSize(title).
-func (c *Context) EndWindow() {
-	if c == nil {
-		return
-	}
-	c.enc.PopClip()
-	frame, ok := c.popLayout()
-
-	// Window id was hashed by BeginWindow against c.idStack; it's still
-	// the top of the stack here, so re-hash to find the windowState.
-	id := c.hashID()
-	ws, _ := c.states[id].(*windowState)
-
-	outerH := frame.rect.H
-	if ok && frame.autoH {
-		contentH := frame.cursorY - frame.startY
-		if contentH < 0 {
-			contentH = 0
-		}
-		topGap := frame.startY - (frame.winY + frame.titleH) // == padTop
-		outerH = frame.titleH + topGap + contentH + frame.padBot
-		outerRect := emath.Rect{X: frame.winX, Y: frame.winY, W: frame.winW, H: outerH}
-		if frame.bgCmd >= 0 {
-			c.enc.PatchRect(frame.bgCmd, outerRect)
-		}
-		clipRect := emath.Rect{
-			X: frame.rect.X,
-			Y: frame.rect.Y,
-			W: frame.rect.W,
-			H: contentH,
-		}
-		c.enc.PatchRect(frame.clipCmd, clipRect)
-	}
-	if ws != nil {
-		ws.LastOuterH = outerH
-		ws.LastOuterW = frame.winW
-	}
-
-	if len(c.idStack) > 0 {
-		c.idStack = c.idStack[:len(c.idStack)-1]
-	}
-}
-
-// WindowSize returns the outer (W, H) drawn for the named window on the
-// previous frame, or zero if it hasn't been seen yet. Use this to stack
-// auto-sized windows: layoutY += g.uiCtx.WindowSize("Log").H + gap.
-func (c *Context) WindowSize(title string) emath.Rect {
-	if c == nil {
-		return emath.Rect{}
-	}
-	c.idStack = append(c.idStack, "win:"+title)
-	id := c.hashID()
-	c.idStack = c.idStack[:len(c.idStack)-1]
-	if ws, ok := c.states[id].(*windowState); ok {
-		return emath.Rect{W: ws.LastOuterW, H: ws.LastOuterH}
-	}
-	return emath.Rect{}
-}
+// Event implements Node.
+func (w *Window) Event(_ *Event, _ *EventCtx) bool { return false }

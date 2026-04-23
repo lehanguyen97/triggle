@@ -248,10 +248,8 @@ func (r *ForwardRenderer) Release() {
 		r.uiProgram.Release(g)
 		r.uiProgram = nil
 	}
-	if r.cache != nil {
-		r.cache.Release()
-		r.cache = nil
-	}
+	r.cache.Release()
+	r.cache = nil
 	if r.shadowShader >= 0 {
 		g.ShaderDestroy(r.shadowShader)
 		r.shadowShader = -1
@@ -276,7 +274,7 @@ func (r *ForwardRenderer) Release() {
 }
 
 func (r *ForwardRenderer) destroyUIMesh() {
-	if r == nil || r.uiMesh < 0 {
+	if r.uiMesh < 0 {
 		return
 	}
 	id := r.uiMesh

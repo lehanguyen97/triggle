@@ -1,108 +1,72 @@
 # Triggle UI Design
 
-Immediate-mode UI (microui-shaped) over `engine/text` (renderer-agnostic shaper/raster) and `engine/emath` (Vec2/Rect/UVRect). Same Go code on native (CGO + HB+FT atlas) and WASM (browser per-line raster). Commands flow through `engine/render/ui_renderer.go` into the shared per-frame command buffer — no separate UI submission.
+**Retained-mode** UI: game code owns widget values (`&ui.TextInput{...}`), `ui.App` drives layout, hit testing, and host text-input, and emits a flat `engine/ui/cmd` stream. Same stack on native (CGO + HB+FT) and WASM (per-line canvas raster + optional DOM text-input). Commands go through `engine/render/ui_renderer.go` into the shared per-frame command buffer.
+
+The previous **immediate-mode** API (`*ui.Context`, `BeginWindow`, `StateOf[T]`, vertical pen) is preserved in package **`engine/iui`** as a read-only reference copy (not used by the game). Do not add new product features to `iui` unless you are comparing approaches.
 
 ## Using the UI
 
 ```go
-// init (once)
+// init (once) — build a tree, then mount
 font, _ := text.OpenFont(backend, fontPath)
 th := theme.DefaultTheme()
-th.BodyPx  = int32(float32(th.BodyPx)  * dpiScale)   // caller applies DPI; engine does not
+th.BodyPx  = int32(float32(th.BodyPx)  * dpiScale)
 th.TitlePx = int32(float32(th.TitlePx) * dpiScale)
-ctx, _ := ui.NewContext(ui.ContextOptions{Backend: backend, Theme: th, Font: font})
 
-// per frame — auto-sized window with stacked widgets (ImGui-style pen layout)
-ctx.Begin(inputFrame, emath.Rect{W: winW, H: winH}, dt)
-flags := ui.WindowNoResize | ui.WindowNoClose | ui.WindowAutoSizeY
-if ctx.BeginWindow("HUD", emath.Rect{X: 10, Y: 10, W: 360}, flags) {
-    ctx.LogView(lines, ui.LogViewOpt{MaxVisible: 12, AutoScroll: true})
-    ctx.TextInput("name", ui.TextInputOpt{Initial: "hello", MaxBytes: 128})
-    ctx.EndWindow()
+app, _ := ui.NewApp(ui.AppOptions{Backend: backend, Theme: th, Font: font})
+log := &ui.LogView{MaxVisible: 12, Color: cmd.Color{R: 235, G: 235, B: 240, A: 255}}
+name := &ui.TextInput{Value: "hello", MaxBytes: 128}
+hud := &ui.Window{
+    Title: "HUD", Pos: emath.Vec2{10, 10}, Width: 360,
+    Flags: ui.WindowNoResize | ui.WindowNoClose,
+    Child: &ui.Padding{Insets: th.Padding, Child: &ui.Column{
+        Kids: []ui.Node{log, name},
+    }},
 }
-ctx.End()
-rnd.SubmitUI(ctx.Commands(), ctx.TextureBindings())
-if !ctx.WantsMouse()    { /* game picking / camera */ }
-if !ctx.WantsKeyboard() { /* game hotkeys */ }
-inputFrame = inputFrame.NextFrame()                  // clear edge bits
+app.SetRoot(hud)
 
-// teardown — Context first, then Font
-ctx.Close(); font.Close()
+// per frame — push log data, then tick
+log.Lines = lines
+app.Tick(inputFrame, emath.Rect{W: winW, H: winH}, dt)
+rnd.SubmitUI(app.Commands(), app.TextureBindings())
+if !app.WantsMouse()    { /* game picking / camera */ }
+if !app.WantsTextInput() { /* game typing */ }
+inputFrame = inputFrame.NextFrame()
+
+// teardown — App first, then Font
+app.Close(); font.Close()
 ```
 
-## Developing a new widget
+## New widgets and containers
 
-Widgets are methods on `*ui.Context`, one file per widget in package `ui` (no build tags). Pattern:
-
-```go
-// engine/ui/mywidget.go
-package ui
-
-import (
-    "triggle/engine/text"
-    "triggle/engine/ui/theme"
-)
-
-type MyResult struct{ Hovered, Clicked bool }
-
-func (c *Context) MyWidget(label string) MyResult {
-    // 1. Identity — push a unique string per call site; pop on return.
-    c.idStack = append(c.idStack, "mywidget:"+label)
-    id := c.hashID()
-    defer func() { c.idStack = c.idStack[:len(c.idStack)-1] }()
-
-    // 2. Per-widget state in the typed pool (zero-init first frame).
-    type mws struct{ Hover, Armed bool }
-    ws := StateOf[mws](c, id)
-
-    // 3. Layout — reserve the next vertical row in the current container.
-    //    The pen advances by h + theme.Spacing automatically; auto-sized
-    //    windows (WindowAutoSizeY) measure their content from these calls.
-    //    Use c.Avail() if you want the remaining slot instead of a row.
-    r := c.LayoutNextRow(rowH)
-
-    // 4. Input — MousePressed/Released are edge bits, MouseDown is level.
-    mx, my := int32(c.in.MousePos[0]), int32(c.in.MousePos[1])
-    ws.Hover = r.Contains(mx, my)
-    if ws.Hover { c.MarkHover() }                    // sets WantsMouse
-    clicked := false
-    if ws.Hover && c.in.MousePressed&MouseLeft != 0 {
-        ws.Armed = true; c.SetActive(id)
-    }
-    if c.in.MouseReleased&MouseLeft != 0 {
-        if ws.Armed && ws.Hover { clicked = true }
-        ws.Armed = false; c.ClearActive(id)
-    }
-
-    // 5. Draw — StyleBox for background, Font for text, Encoder for custom quads.
-    st := theme.StateNormal
-    switch {
-    case ws.Armed: st = theme.StateActive
-    case ws.Hover: st = theme.StateHover
-    }
-    c.theme.StyleBoxes[theme.ClassButton][st].Draw(&c.enc, r)
-    col := c.theme.Colors[theme.ColorText]
-    c.font.Draw(&c.enc, label, r.X+4, r.Y+4, c.theme.BodyPx,
-        text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
-
-    return MyResult{Hovered: ws.Hover, Clicked: clicked}
-}
-```
-
-Container (clips + owns a child layout rect): in `BeginX`, pair `c.pushLayout(layoutFrame{rect: inner, spacing: c.theme.Spacing})` + `c.enc.PushClip(inner)`; in `EndX`, pair `c.enc.PopClip()` + `c.popLayout()` + the idStack pop. See `window.go`. Container's children call `LayoutNextRow` against the inner frame; `cursorY - startY` is the measured content height for auto-sizing.
-
-Auto-sized container (e.g. `WindowAutoSizeY`): emit bg quad + clip push at Begin with placeholder rects, remember `enc.CmdIndex()` for each. At End, after `popLayout`, compute the measured outer rect and call `enc.PatchRect(idx, rect)` on each placeholder. The encoder's clip stack uses the (loose) intersected rect for child clip pushes during the body — patching the command's `Rect` updates what the renderer sees, not the stack. Fine in practice because well-behaved widgets never draw past the measured `cursorY`.
-
-Custom drawing (timeline, curve, inspector): take `&c.enc` and emit `QuadSolid` / `AddTexturedQuad` / `font.Draw` directly. Hit-test against your own data-coord rects.
+- Implement `ui.Node` on a struct that embeds `ui.BaseNode` (gives `Rect`, `WidgetID`, `Invalidate`).
+- `Measure(Constraints) Size` — intrinsic or max constraint size; `Place(emath.Rect)` — absolute frame coords for `BaseNode.rect` and children.
+- `Paint(*PaintCtx)` — `enc.QuadSolid`, `font.Draw` / `DrawVolatile` for text fields with focus, `Enc.PushClip`/`PopClip` as needed.
+- `Event` is only used for the focused `TextInput` (App routes `KeyEvents` + `Text` there). Other nodes return false from `Event` unless you add dedicated routing.
+- **Containers**: `Column` (`Kids`), `Padding`, `SizedBox`, `Stack` (z-order, top hit last in array). **Window** — title bar, drag via `Pos`, content clip, shrink-to-child width/height.
+- **Host text-input** (`Backend.TextInput{Begin,End,Poll}`): `App` reconciles a single session; focused `TextInput` publishes `rect` + buffer each frame. WASM uses the hidden `<input>`; native sokol uses no-op stubs (SDL3 later).
 
 ## Non-obvious rules
 
-- **Clip stack is intersected, not stacked verbatim.** `Encoder.PushClip(r)` pushes `intersect(top, r)`.
-- **First UI draw each frame re-applies scissor.** `sg_apply_scissor_rect` is pass-scoped and resets on `sg_begin_pass`; `UIProgram.EmitUI` emits a full-viewport scissor before its first quad.
-- **Bind id 1 is the context-owned 1×1 white texture.** Solid quads (`Encoder.QuadSolid`) ride it. Ids ≥ 2 are encoder-allocated per `(image, sampler)` per frame — not stable across frames.
-- **Straight alpha, swapchain-native color space.** `SrcAlpha, OneMinusSrcAlpha`, no `pow(2.2)`. Promoting to sRGB or premultiplied is a future milestone, not a local tweak.
-- **`DPIScale` is pre-applied to `Theme.BodyPx`/`TitlePx` by the caller.** Widgets treat `BodyPx` as framebuffer pixels; the engine never multiplies by DPI.
-- **Persistent state lives in `StateOf[T]`.** Widgets are re-entered every frame; locals and return values disappear.
-- **Layout is a vertical pen, ImGui-style.** `LayoutNextRow(h)` reserves a full-width row at `cursorY` and advances by `h`; subsequent rows get `theme.Spacing` between them automatically. `Avail()` returns the remaining slot. Per-widget size helpers (`TextInputHeight`, `LogViewHeight`) exist for callers that still want to size a fixed-rect window, but widgets call `LayoutNextRow` themselves so callers don't have to.
-- **`WindowAutoSizeY` makes the window fit its content.** Caller passes `rect` with `H` omitted; `BeginWindow` emits placeholder bg + clip, `EndWindow` patches them from the measured pen advance. Stash + lookup of last-frame size: `Context.WindowSize(title)` for callers that want to chain sibling windows.
-- **Close order: `Context` before `Font`.** `Context.Close` releases the white texture + state map; `Font.Close` tears down per-size handles (and the shared `textServer` when the last `Font` on that backend closes).
+- **Clip stack is intersected.** `Encoder.PushClip(r)` uses `intersect(top, r)`.
+- **Bind id 1** is the app-owned 1×1 white texture. Ids `>= 2` are per-frame dynamic binds from text atlas uploads.
+- **DPI** is applied by the caller to `Theme.BodyPx` / `TitlePx` before constructing widgets.
+- **Close order:** `App.Close()` before `Font.Close()`; `App` ends the text-input host session and drops volatile line rasters.
+- For **legacy ImGui-style** layout (`LayoutNextRow`, `WindowAutoSizeY` + `PatchRect`), read `engine/iui` and the previous git history.
+
+## Developing a new widget (sketch)
+
+```go
+type MyWidget struct {
+    ui.BaseNode
+    parent     ui.Node
+    Label      string
+}
+func (m *MyWidget) Children() []ui.Node { return nil }
+func (m *MyWidget) Measure(c ui.Constraints) ui.Size { /* ... */ return ui.Size{W: w, H: h} }
+func (m *MyWidget) Place(outer emath.Rect) { m.BaseNode.rect = outer }
+func (m *MyWidget) Paint(pc *ui.PaintCtx) { /* enc + font */ }
+func (m *MyWidget) Event(*ui.Event, *ui.EventCtx) bool { return false }
+```
+
+Call `g.uiApp.SetRoot` again if the tree structure changes, or add children with remount in a follow-up (today: build static trees in `init`).

@@ -122,9 +122,12 @@ type Game struct {
 	gltfAsset int32
 	gltfMesh  int32 // always valid; placeholder when glTF load fails or after unload in cleanup
 
-	// UI (immediate-mode overlay)
-	uiCtx         *ui.Context
-	uiFont        *text.Font
+	// UI (retained overlay)
+	uiApp    *ui.App
+	uiLog    *ui.LogView
+	uiName   *ui.TextInput
+	uiMsg    *ui.TextInput
+	uiFont   *text.Font
 	uiInput       ui.InputFrame
 	uiBlocksMouse bool
 	uiBlocksKey   bool
@@ -281,12 +284,11 @@ func (g *Game) update(dt float32) int32 {
 
 	g.renderer.SetScreenSize(g.winW, g.winH)
 
-	if g.uiCtx != nil {
-		g.uiCtx.Begin(g.uiInput, emath.Rect{W: g.winW, H: g.winH}, dt)
+	if g.uiApp != nil {
 		g.buildUI()
-		g.uiCtx.End()
-		g.uiBlocksMouse = g.uiCtx.WantsMouse()
-		g.uiBlocksKey = g.uiCtx.WantsTextInput()
+		g.uiApp.Tick(g.uiInput, emath.Rect{W: g.winW, H: g.winH}, dt)
+		g.uiBlocksMouse = g.uiApp.WantsMouse()
+		g.uiBlocksKey = g.uiApp.WantsTextInput()
 	}
 
 	cam := render.CameraState{ViewProj: g.viewProj, CameraPos: g.cameraPos}
@@ -340,8 +342,8 @@ func (g *Game) update(dt float32) int32 {
 	}
 	g.drawScorePegs()
 
-	if g.uiCtx != nil {
-		g.renderer.SubmitUI(g.uiCtx.Commands(), g.uiCtx.TextureBindings())
+	if g.uiApp != nil {
+		g.renderer.SubmitUI(g.uiApp.Commands(), g.uiApp.TextureBindings())
 	}
 	g.renderer.EndFrame()
 

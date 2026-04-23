@@ -112,7 +112,7 @@ func (a *glyphAtlas) ensureGlyph(handle int32, glyphID uint32) (atlasGlyph, erro
 }
 
 func (a *glyphAtlas) uploadIfDirty() {
-	if a == nil || !a.dirty || len(a.atlasPix) == 0 {
+	if !a.dirty || len(a.atlasPix) == 0 {
 		return
 	}
 	a.b.ImageUpdateRGBA8(a.atlasImg, a.atlasSize, a.atlasSize,

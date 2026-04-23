@@ -36,9 +36,6 @@ func (p *UIProgram) Init(g backend.Backend, cache *PipelineFamilyCache) bool {
 func (p *UIProgram) MainFamily() PipelineFamilyID { return p.mainFamily }
 
 func (p *UIProgram) Release(g backend.Backend) {
-	if p == nil {
-		return
-	}
 	if p.shader >= 0 {
 		g.ShaderDestroy(p.shader)
 		p.shader = -1

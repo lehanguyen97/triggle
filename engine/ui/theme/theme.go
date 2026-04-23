@@ -88,9 +88,6 @@ type StyleBoxFlat struct {
 func (s StyleBoxFlat) ContentMargin() Insets { return s.Padding }
 
 func (s StyleBoxFlat) Draw(enc *cmd.Encoder, rect emath.Rect) {
-	if enc == nil {
-		return
-	}
 	enc.QuadSolid(rect, s.Background)
 }
 

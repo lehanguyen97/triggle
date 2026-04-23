@@ -10,7 +10,7 @@ Keep this file and `ai/` docs updated on architectural changes. Goal: resume fro
 
 Branch `wasm-go`. Hex board (side=5, 91 pegs) + sphere pegs, Phong + shadow map, toon sample, UI log overlay, rubber-band placement.
 
-**Next**: text input widget (see `ai/text-input.md`); then cylinder peg mesh.
+**Next**: retained UI extension as needed; then cylinder peg mesh. Text input: see `ai/text-input.md` (product stack uses `engine/ui` + host bridge).
 
 ## Docs
 
@@ -41,7 +41,7 @@ Branch `wasm-go`. Hex board (side=5, 91 pegs) + sphere pegs, Phong + shadow map,
 - WASM `triggle.html` auto-forwards `Module._backend_*` exports into game `env` imports.
 - Native-only text APIs (`ShapeUTF8`, `RasterGlyphRGBA8`) live on `Host.Text` in `host_native.go`; WASM has `RasterLineRGBA8` instead.
 - Host-owned text-input session uses SDL3-style names (`Backend.TextInput{Begin,End,Poll}`): real on WASM (hidden `<input>` overlay), no-op stubs on native sokol. Keeps `engine/ui` platform-blind; SDL3 native swap fills stubs without UI churn.
-- UI layout is a vertical pen (ImGui-style): widgets call `Context.LayoutNextRow(h)` instead of carving from `ContentRect`; `WindowAutoSizeY` patches the window bg/clip at `EndWindow` from the measured pen advance via `cmd.Encoder.PatchRect`. Callers stack widgets inside one window instead of pre-summing component heights.
+- **Retained UI** (`engine/ui`): `ui.App` + `ui.Node` tree (`Window`, `Column`, `TextInput`, …). Layout `Measure`/`Place` then `Paint` each `Tick`. Legacy immediate-mode is frozen in `engine/iui` (`Context`, `StateOf`, `LayoutNextRow`, `WindowAutoSizeY` + `PatchRect`) for reference only.
 
 ## Build
 

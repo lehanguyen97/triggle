@@ -51,9 +51,6 @@ func (p *ToonProgram) DrawMain(r *ForwardRenderer, d SceneDrawable, indexCount i
 }
 
 func (p *ToonProgram) Release(g backend.Backend) {
-	if p == nil {
-		return
-	}
 	if p.shader >= 0 {
 		g.ShaderDestroy(p.shader)
 		p.shader = -1

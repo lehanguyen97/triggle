@@ -288,7 +288,7 @@ func (srv *textServer) drawVolatile(fontID int32, owner uint32, s string, x, y, 
 }
 
 func (srv *textServer) dropVolatile(owner uint32) {
-	if srv == nil || owner == 0 || srv.volatile == nil {
+	if owner == 0 || srv.volatile == nil {
 		return
 	}
 	for k, line := range srv.volatile {

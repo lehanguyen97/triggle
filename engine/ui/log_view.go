@@ -1,70 +1,93 @@
 package ui
 
 import (
+	"triggle/engine/emath"
 	"triggle/engine/text"
 	"triggle/engine/ui/cmd"
 	"triggle/engine/ui/theme"
 )
 
-// LogViewOpt configures the log list widget.
-type LogViewOpt struct {
+// LogView shows the last N lines in a column.
+type LogView struct {
+	BaseNode
+	parent Node
+	Lines      []string
 	MaxVisible int
 	AutoScroll bool
 	Color      cmd.Color
 }
 
-// LogViewHeight returns the pixel height a LogView occupies for `lines` rows
-// at pxSize: font.LineHeight (LineSkip) * lines, the same per-line advance
-// LogView uses to stack text. Width is set by the parent ContentRect.
-//
-//	winH = theme.TitleHeight + theme.Padding.Top +
-//	       ui.LogViewHeight(font, px, n) + theme.Padding.Bottom
-func LogViewHeight(font *text.Font, pxSize int32, lines int) int32 {
-	if font == nil || lines <= 0 {
-		return 0
-	}
-	skip := font.Metrics(pxSize).LineHeight
-	if skip <= 0 {
-		skip = pxSize
-	}
-	return skip * int32(lines)
+// SetLines replaces lines and invalidates layout.
+func (l *LogView) SetLines(lines []string) {
+	l.Lines = lines
+	l.Invalidate()
 }
 
-// LogView draws recent log lines and reserves a vertical block of
-// MaxVisible rows in the current container (full container width).
-// MaxVisible <= 0 defaults to 12.
-func (c *Context) LogView(lines []string, opt LogViewOpt) {
-	if c == nil || c.font == nil {
-		return
+// AppendLine adds a line and invalidates.
+func (l *LogView) AppendLine(s string) {
+	l.Lines = append(l.Lines, s)
+	l.Invalidate()
+}
+
+// Children implements Node.
+func (l *LogView) Children() []Node { return nil }
+
+// Measure implements Node.
+func (l *LogView) Measure(c Constraints) Size {
+	if l.app == nil || l.app.font == nil {
+		return Size{}
 	}
-	maxV := opt.MaxVisible
+	maxV := l.MaxVisible
 	if maxV < 1 {
 		maxV = 12
 	}
-
-	px := c.theme.BodyPx
-	lineSkip := c.font.Metrics(px).LineHeight
+	cn := normConstraints(c)
+	px := l.app.theme.BodyPx
+	lineSkip := l.app.font.Metrics(px).LineHeight
 	if lineSkip <= 0 {
 		lineSkip = px
 	}
-	r := c.LayoutNextRow(lineSkip * int32(maxV))
+	return Size{W: cn.MaxW, H: lineSkip * int32(maxV)}
+}
 
+// Place implements Node.
+func (l *LogView) Place(outer emath.Rect) {
+	l.BaseNode.rect = outer
+}
+
+// Paint implements Node.
+func (l *LogView) Paint(pc *PaintCtx) {
+	if l.app == nil || l.app.font == nil {
+		return
+	}
+	maxV := l.MaxVisible
+	if maxV < 1 {
+		maxV = 12
+	}
+	r := l.rect
+	px := l.app.theme.BodyPx
+	lineSkip := l.app.font.Metrics(px).LineHeight
+	if lineSkip <= 0 {
+		lineSkip = px
+	}
+	lines := l.Lines
 	n := len(lines)
 	start := 0
 	if n > maxV {
 		start = n - maxV
 	}
 	visible := lines[start:]
-
-	col := opt.Color
+	col := l.Color
 	if col.R == 0 && col.G == 0 && col.B == 0 && col.A == 0 {
-		col = c.theme.Colors[theme.ColorText]
+		col = l.app.theme.Colors[theme.ColorText]
 	}
 	tc := text.Color{R: col.R, G: col.G, B: col.B, A: col.A}
-
-	cursorY := r.Y
+	y := r.Y
 	for _, line := range visible {
-		c.font.Draw(&c.enc, line, r.X, cursorY, px, tc)
-		cursorY += lineSkip
+		l.app.font.Draw(pc.Enc, line, r.X, y, px, tc)
+		y += lineSkip
 	}
 }
+
+// Event implements Node.
+func (l *LogView) Event(_ *Event, _ *EventCtx) bool { return false }

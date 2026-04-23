@@ -65,9 +65,6 @@ func (c *PipelineFamilyCache) Pipeline(family PipelineFamilyID, indexType int32)
 
 // Release destroys every cached pipeline. The cache must not be used after this.
 func (c *PipelineFamilyCache) Release() {
-	if c == nil {
-		return
-	}
 	for _, it := range c.items {
 		if it.pip16 >= 0 {
 			c.gpu.PipelineDestroy(it.pip16)

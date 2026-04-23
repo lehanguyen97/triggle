@@ -56,9 +56,6 @@ func (p *PhongProgram) DrawMain(r *ForwardRenderer, d SceneDrawable, indexCount 
 }
 
 func (p *PhongProgram) Release(g backend.Backend) {
-	if p == nil {
-		return
-	}
 	if p.shader >= 0 {
 		g.ShaderDestroy(p.shader)
 		p.shader = -1

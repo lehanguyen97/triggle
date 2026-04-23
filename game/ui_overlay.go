@@ -20,7 +20,27 @@ func (g *Game) initUI() error {
 	th.BodyPx = int32(float32(th.BodyPx) * g.dpiScale)
 	th.TitlePx = int32(float32(th.TitlePx) * g.dpiScale)
 
-	ctx, err := ui.NewContext(ui.ContextOptions{
+	g.uiLog = &ui.LogView{
+		MaxVisible: 12,
+		AutoScroll: true,
+		Color:      cmd.Color{R: 235, G: 235, B: 240, A: 255},
+	}
+	g.uiName = &ui.TextInput{Value: "hello", MaxBytes: 128}
+	g.uiMsg = &ui.TextInput{Value: "message", MaxBytes: 128}
+	hud := &ui.Window{
+		Title: "HUD",
+		Pos:   emath.Vec2{10, 10},
+		Width: 360,
+		Flags: ui.WindowNoResize | ui.WindowNoClose,
+		Child: &ui.Padding{
+			Insets: th.Padding,
+			Child: &ui.Column{
+				Kids: []ui.Node{g.uiLog, g.uiName, g.uiMsg},
+			},
+		},
+	}
+
+	app, err := ui.NewApp(ui.AppOptions{
 		Backend: b,
 		Theme:   th,
 		Font:    font,
@@ -30,33 +50,22 @@ func (g *Game) initUI() error {
 		g.uiFont = nil
 		return err
 	}
-	g.uiCtx = ctx
+	g.uiApp = app
+	g.uiApp.SetRoot(hud)
 	return nil
 }
 
 func (g *Game) buildUI() {
-	if g.uiCtx == nil {
+	if g.uiApp == nil {
 		return
 	}
-	// One window, vertically stacked widgets. The pen inside BeginWindow
-	// drives layout; WindowAutoSizeY makes the frame fit its contents.
-	flags := ui.WindowNoResize | ui.WindowNoClose | ui.WindowAutoSizeY
-	if g.uiCtx.BeginWindow("HUD", emath.Rect{X: 10, Y: 10, W: 360}, flags) {
-		g.uiCtx.LogView(g.logBuf, ui.LogViewOpt{
-			MaxVisible: 12,
-			AutoScroll: true,
-			Color:      cmd.Color{R: 235, G: 235, B: 240, A: 255},
-		})
-		g.uiCtx.TextInput("name", ui.TextInputOpt{Initial: "hello", MaxBytes: 128})
-		g.uiCtx.TextInput("message", ui.TextInputOpt{Initial: "message", MaxBytes: 128})
-		g.uiCtx.EndWindow()
-	}
+	g.uiLog.Lines = g.logBuf
 }
 
 func (g *Game) closeUI() {
-	if g.uiCtx != nil {
-		g.uiCtx.Close()
-		g.uiCtx = nil
+	if g.uiApp != nil {
+		g.uiApp.Close()
+		g.uiApp = nil
 	}
 	if g.uiFont != nil {
 		g.uiFont.Close()

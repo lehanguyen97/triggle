@@ -64,9 +64,6 @@ type texKey struct {
 
 // Reset clears the encoder for a new frame (dynamic binds start at id 2).
 func (e *Encoder) Reset(viewport emath.Rect) {
-	if e == nil {
-		return
-	}
 	e.cmds = e.cmds[:0]
 	e.clipStack = e.clipStack[:0]
 	e.viewport = viewport
@@ -77,9 +74,6 @@ func (e *Encoder) Reset(viewport emath.Rect) {
 
 // Quad draws a textured quad.
 func (e *Encoder) Quad(bindID uint32, dst emath.Rect, uv emath.UVRect, color Color) {
-	if e == nil {
-		return
-	}
 	e.cmds = append(e.cmds, UICmd{
 		Kind:   CmdQuad,
 		BindID: bindID,
@@ -96,7 +90,7 @@ func (e *Encoder) QuadSolid(dst emath.Rect, color Color) {
 
 // AddTexturedQuad implements text.QuadSink: allocates a bind id per (image, sampler) each frame.
 func (e *Encoder) AddTexturedQuad(image, sampler int32, dst emath.Rect, uv emath.UVRect, color text.Color) {
-	if e == nil || image < 0 || sampler < 0 {
+	if image < 0 || sampler < 0 {
 		return
 	}
 	k := texKey{img: image, smp: sampler}
@@ -118,18 +112,10 @@ func (e *Encoder) AddTexturedQuad(image, sampler int32, dst emath.Rect, uv emath
 }
 
 // Bindings returns dynamic texture bindings recorded this frame (excludes bind 1 white).
-func (e *Encoder) Bindings() []Binding {
-	if e == nil {
-		return nil
-	}
-	return e.bindings
-}
+func (e *Encoder) Bindings() []Binding { return e.bindings }
 
 // PushClip intersects with the current clip and records a push command.
 func (e *Encoder) PushClip(r emath.Rect) {
-	if e == nil {
-		return
-	}
 	parent := e.viewport
 	if len(e.clipStack) > 0 {
 		parent = e.clipStack[len(e.clipStack)-1]
@@ -141,7 +127,7 @@ func (e *Encoder) PushClip(r emath.Rect) {
 
 // PopClip pops one clip level.
 func (e *Encoder) PopClip() {
-	if e == nil || len(e.clipStack) == 0 {
+	if len(e.clipStack) == 0 {
 		return
 	}
 	e.clipStack = e.clipStack[:len(e.clipStack)-1]
@@ -149,30 +135,20 @@ func (e *Encoder) PopClip() {
 }
 
 // Commands returns the encoded stream for this frame.
-func (e *Encoder) Commands() []UICmd {
-	if e == nil {
-		return nil
-	}
-	return e.cmds
-}
+func (e *Encoder) Commands() []UICmd { return e.cmds }
 
 // CmdIndex returns the index of the next command to be appended. Pair with
 // PatchRect to fix up Rect after the size is known (used by auto-sized
 // windows: emit bg quad + clip push at Begin with placeholder rects, patch
 // at End once the content's measured height is in).
-func (e *Encoder) CmdIndex() int {
-	if e == nil {
-		return 0
-	}
-	return len(e.cmds)
-}
+func (e *Encoder) CmdIndex() int { return len(e.cmds) }
 
 // PatchRect overwrites the Rect of a previously-emitted command (Quad or
 // ClipPush). Out-of-range or wrong-kind indices are ignored. Does NOT touch
 // the encoder's clip stack — callers patching ClipPush must keep the stack
 // shape unchanged (only the rect dims can move).
 func (e *Encoder) PatchRect(idx int, r emath.Rect) {
-	if e == nil || idx < 0 || idx >= len(e.cmds) {
+	if idx < 0 || idx >= len(e.cmds) {
 		return
 	}
 	c := &e.cmds[idx]
