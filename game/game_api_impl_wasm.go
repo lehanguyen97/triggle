@@ -2,7 +2,9 @@
 
 package main
 
-import "triggle/engine/hostlog"
+import (
+	"triggle/engine/hostlog"
+)
 
 var game *Game
 
@@ -30,23 +32,45 @@ func game_frame(g int32, dt float64) int32 {
 	return game.update(float32(dt))
 }
 
-//go:wasmexport game_event
-func game_event(g int32,
-	evType int32, keyOrBtn int32,
-	isDown int32, isRepeat int32,
-	mouseX float32, mouseY float32,
-	scrollX float32, scrollY float32,
-	winW int32, winH int32) int32 {
+// game_input_event covers keyboard, text, mouse buttons, motion, and scroll.
+// All input events share this signature; the host packs per-kind payload into
+// the generic scalar slots and the Go side decodes them into a typed event.
+//
+// Slot semantics by kind:
+//
+//	KindKey:         a=Key, b=down(0/1), c=repeat(0/1), d=Mods,  fx..fw unused
+//	KindText:        a=codepoint (UTF-32),                       fx..fw unused
+//	KindMouseButton: a=Button, b=down(0/1), c=Mods,              fx,fy = pos
+//	KindMouseMove:   a=Mods,                                     fx,fy = pos, fz,fw = delta
+//	KindMouseScroll: a=Mods,                                     fx,fy = pos, fz,fw = scroll delta
+//
+//go:wasmexport game_input_event
+func game_input_event(g int32, kind int32, a int32, b int32, c int32, d int32,
+	fx float32, fy float32, fz float32, fw float32) int32 {
 	if g != 0 {
-		hostlog.LogError("triggle: invalid game handle (game_event)")
+		hostlog.LogError("triggle: invalid game handle (game_input_event)")
 		return -1
 	}
-	return game.handleEvent(
-		evType, keyOrBtn,
-		isDown, isRepeat,
-		mouseX, mouseY,
-		scrollX, scrollY,
-		winW, winH)
+	pushInputEvent(kind, a, b, c, d, fx, fy, fz, fw)
+	return 0
+}
+
+// game_window_event covers window-level events (resize, dpi change, focus).
+//
+// Slot semantics by kind:
+//
+//	KindResize:     w,h = framebuffer pixels; fdpi = current dpi scale
+//	KindDPIChanged: w,h = current framebuffer pixels; fdpi = new dpi scale
+//	KindFocus:      w=focused(0/1), h unused, fdpi unused
+//
+//go:wasmexport game_window_event
+func game_window_event(g int32, kind int32, w int32, h int32, fdpi float32) int32 {
+	if g != 0 {
+		hostlog.LogError("triggle: invalid game handle (game_window_event)")
+		return -1
+	}
+	pushWindowEvent(kind, w, h, fdpi)
+	return 0
 }
 
 //go:wasmexport game_get_score

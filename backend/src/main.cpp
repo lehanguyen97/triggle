@@ -34,16 +34,15 @@ EM_JS(int32_t, game_frame, (int32_t g, double dt), {
     return Module._gameExports.game_frame(g, dt);
 });
 
-EM_JS(int32_t, game_event, (int32_t g,
-    int32_t ev_type, int32_t key_or_btn,
-    int32_t is_down, int32_t is_repeat,
-    float mouse_x, float mouse_y,
-    float scroll_x, float scroll_y,
-    int32_t win_w, int32_t win_h), {
-    return Module._gameExports.game_event(g,
-        ev_type, key_or_btn, is_down, is_repeat,
-        mouse_x, mouse_y, scroll_x, scroll_y,
-        win_w, win_h);
+EM_JS(int32_t, game_input_event, (int32_t g, int32_t kind,
+    int32_t a, int32_t b, int32_t c, int32_t d,
+    float fx, float fy, float fz, float fw), {
+    return Module._gameExports.game_input_event(g, kind, a, b, c, d, fx, fy, fz, fw);
+});
+
+EM_JS(int32_t, game_window_event, (int32_t g, int32_t kind,
+    int32_t w, int32_t h, float fdpi), {
+    return Module._gameExports.game_window_event(g, kind, w, h, fdpi);
 });
 
 EM_JS(int32_t, game_cleanup, (int32_t g), {
@@ -72,9 +71,16 @@ static int map_keycode(sapp_keycode kc) {
     }
 }
 
+// Sokol's modifier bits happen to coincide with our GMOD_* layout (Shift/Ctrl
+// /Alt/Cmd in the low nibble). Mask defensively in case sokol exposes more.
+static int32_t map_mods(uint32_t sokol_mods) {
+    return (int32_t)(sokol_mods & 0xF);
+}
+
 static void send_resize(void) {
-    game_event(game, G_EVENT_RESIZE, 0, 0, 0, 0, 0, 0, 0,
-        sapp_width(), sapp_height());
+    // dpi=1.0 because high_dpi is not enabled in sokol_main yet; the viewport
+    // refactor turns this on and replaces the literal with sapp_dpi_scale().
+    game_window_event(game, G_EVENT_RESIZE, sapp_width(), sapp_height(), 1.0f);
 }
 
 void on_init(void) {
@@ -96,49 +102,54 @@ void on_frame(void) {
 }
 
 void on_event(const sapp_event* sev) {
-    int32_t w = sev->framebuffer_width;
-    int32_t h = sev->framebuffer_height;
-
     switch (sev->type) {
         case SAPP_EVENTTYPE_KEY_DOWN:
         case SAPP_EVENTTYPE_KEY_UP: {
-            int32_t type = sev->type == SAPP_EVENTTYPE_KEY_DOWN ? G_EVENT_KEY_DOWN : G_EVENT_KEY_UP;
             int32_t kc = map_keycode(sev->key_code);
             int32_t down = sev->type == SAPP_EVENTTYPE_KEY_DOWN ? 1 : 0;
-            int32_t rep = (sev->key_repeat ? 1 : 0) | ((int32_t)sev->modifiers << 8);
-            game_event(game, type, kc, down, rep, 0, 0, 0, 0, w, h);
+            int32_t rep = sev->key_repeat ? 1 : 0;
+            int32_t mods = map_mods(sev->modifiers);
+            game_input_event(game, G_EVENT_KEY, kc, down, rep, mods, 0, 0, 0, 0);
             break;
         }
         case SAPP_EVENTTYPE_CHAR: {
             int32_t cp = (int32_t)sev->char_code;
             if (cp > 0 && cp < 0x110000) {
-                game_event(game, G_EVENT_TEXT, cp, 0, 0, 0, 0, 0, 0, w, h);
+                game_input_event(game, G_EVENT_TEXT, cp, 0, 0, 0, 0, 0, 0, 0);
             }
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_DOWN:
         case SAPP_EVENTTYPE_MOUSE_UP: {
-            int32_t type = sev->type == SAPP_EVENTTYPE_MOUSE_DOWN ? G_EVENT_MOUSE_DOWN : G_EVENT_MOUSE_UP;
             int32_t btn = (int32_t)sev->mouse_button;
-            int32_t mods = (int32_t)sev->modifiers;
-            game_event(game, type, btn, mods, 0,
-                sev->mouse_x, sev->mouse_y, 0, 0, w, h);
+            int32_t down = sev->type == SAPP_EVENTTYPE_MOUSE_DOWN ? 1 : 0;
+            int32_t mods = map_mods(sev->modifiers);
+            game_input_event(game, G_EVENT_MOUSE_BUTTON, btn, down, mods, 0,
+                sev->mouse_x, sev->mouse_y, 0, 0);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
-            int32_t mods = (int32_t)sev->modifiers;
-            game_event(game, G_EVENT_MOUSE_MOVE, 0, mods, 0,
-                sev->mouse_x, sev->mouse_y, 0, 0, w, h);
+            int32_t mods = map_mods(sev->modifiers);
+            game_input_event(game, G_EVENT_MOUSE_MOVE, mods, 0, 0, 0,
+                sev->mouse_x, sev->mouse_y, sev->mouse_dx, sev->mouse_dy);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_SCROLL: {
-            game_event(game, G_EVENT_MOUSE_SCROLL, 0, 0, 0,
-                sev->mouse_x, sev->mouse_y,
-                sev->scroll_x, sev->scroll_y, w, h);
+            int32_t mods = map_mods(sev->modifiers);
+            game_input_event(game, G_EVENT_MOUSE_SCROLL, mods, 0, 0, 0,
+                sev->mouse_x, sev->mouse_y, sev->scroll_x, sev->scroll_y);
             break;
         }
         case SAPP_EVENTTYPE_RESIZED: {
             send_resize();
+            break;
+        }
+        case SAPP_EVENTTYPE_FOCUSED: {
+            game_window_event(game, G_EVENT_FOCUS, 1, 0, 0);
+            break;
+        }
+        case SAPP_EVENTTYPE_UNFOCUSED: {
+            game_window_event(game, G_EVENT_FOCUS, 0, 0, 0);
             break;
         }
         default:

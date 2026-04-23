@@ -39,23 +39,31 @@ func game_frame(g C.game_t, dt C.double) C.int {
 	return C.int(game.update(float32(dt)))
 }
 
-//export game_event
-func game_event(g C.game_t,
-	evType C.int, keyOrBtn C.int,
-	isDown C.int, isRepeat C.int,
-	mouseX C.float, mouseY C.float,
-	scrollX C.float, scrollY C.float,
-	winW C.int, winH C.int) C.int {
+// game_input_event — see game_api_impl_wasm.go for slot semantics.
+//
+//export game_input_event
+func game_input_event(g C.game_t, kind C.int,
+	a C.int, b C.int, c C.int, d C.int,
+	fx C.float, fy C.float, fz C.float, fw C.float) C.int {
 	if g != 0 {
-		hostlog.LogError("triggle: invalid game handle (game_event)")
+		hostlog.LogError("triggle: invalid game handle (game_input_event)")
 		return -1
 	}
-	return C.int(game.handleEvent(
-		int32(evType), int32(keyOrBtn),
-		int32(isDown), int32(isRepeat),
-		float32(mouseX), float32(mouseY),
-		float32(scrollX), float32(scrollY),
-		int32(winW), int32(winH)))
+	pushInputEvent(int32(kind), int32(a), int32(b), int32(c), int32(d),
+		float32(fx), float32(fy), float32(fz), float32(fw))
+	return 0
+}
+
+// game_window_event — see game_api_impl_wasm.go for slot semantics.
+//
+//export game_window_event
+func game_window_event(g C.game_t, kind C.int, w C.int, h C.int, fdpi C.float) C.int {
+	if g != 0 {
+		hostlog.LogError("triggle: invalid game handle (game_window_event)")
+		return -1
+	}
+	pushWindowEvent(int32(kind), int32(w), int32(h), float32(fdpi))
+	return 0
 }
 
 //export game_get_score

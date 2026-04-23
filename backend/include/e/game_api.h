@@ -7,20 +7,28 @@ extern "C" {
 
 typedef int32_t game_t;
 
-/* Event types (flattened for WASM compat) */
+/*
+ * Event kinds. Mirror engine/event.Kind in Go. Two transport functions
+ * (game_input_event, game_window_event) carry every kind via generic scalar
+ * slots; the Go side decodes them into typed event.Event values pushed onto
+ * event.DefaultQueue.
+ */
 enum {
-  G_EVENT_UNKNOWN = 0,
-  G_EVENT_KEY_DOWN = 1,
-  G_EVENT_KEY_UP = 2,
-  G_EVENT_MOUSE_DOWN = 3,
-  G_EVENT_MOUSE_UP = 4,
-  G_EVENT_MOUSE_MOVE = 5,
-  G_EVENT_MOUSE_SCROLL = 6,
-  G_EVENT_RESIZE = 7,
-  G_EVENT_TEXT = 8,
+  /* Input kinds (carried by game_input_event) */
+  G_EVENT_UNKNOWN      = 0,
+  G_EVENT_KEY          = 1, /* a=key, b=down, c=repeat, d=mods */
+  G_EVENT_TEXT         = 2, /* a=codepoint */
+  G_EVENT_MOUSE_BUTTON = 3, /* a=button, b=down, c=mods, fx,fy=pos */
+  G_EVENT_MOUSE_MOVE   = 4, /* a=mods, fx,fy=pos, fz,fw=delta */
+  G_EVENT_MOUSE_SCROLL = 5, /* a=mods, fx,fy=pos, fz,fw=scroll delta */
+
+  /* Window kinds (carried by game_window_event) */
+  G_EVENT_RESIZE       = 6, /* w,h=framebuffer px, fdpi=dpi scale */
+  G_EVENT_DPI_CHANGED  = 7, /* w,h=framebuffer px, fdpi=new dpi scale */
+  G_EVENT_FOCUS        = 8, /* w=focused (0/1) */
 };
 
-/* Key codes */
+/* Key codes — mirror engine/event.Key. */
 enum {
   GK_UNKNOWN = 0,
   GK_A, GK_B, GK_C, GK_D, GK_E, GK_F, GK_G, GK_H, GK_I, GK_J,
@@ -40,40 +48,46 @@ enum {
   GK_TAB,
 };
 
-/* Mouse buttons */
+/* Mouse buttons — mirror engine/event.MouseButton. */
 enum {
   GMOUSE_LEFT = 0,
   GMOUSE_RIGHT = 1,
   GMOUSE_MIDDLE = 2,
 };
 
-/*
- * Unified event API — always flattened scalars (WASM-compatible).
- *
- * Keyboard: game_event(g, type, keyCode, 0, isRepeatFlags, 0,0,0,0, winW,winH)
- * Mouse:    game_event(g, type, button,  mods, 0,          mouseX,mouseY,scrollX,scrollY, winW,winH)
- * Text:     game_event(g, G_EVENT_TEXT, codepoint, 0, 0, 0,0,0,0, winW,winH)
- *
- * isRepeatFlags layout (keyboard):
- *   bit    0: key repeat flag
- *   bits 8..11: Shift/Ctrl/Alt/Cmd (in that order); host collapses L/R into single bits.
- */
+/* Modifier bits — mirror engine/event.Mods. */
+enum {
+  GMOD_SHIFT = 1 << 0,
+  GMOD_CTRL  = 1 << 1,
+  GMOD_ALT   = 1 << 2,
+  GMOD_CMD   = 1 << 3,
+};
 
 /*
- * game_frame: returns 0 on success; any non-zero value => error (host may quit the loop).
- * Meaning of non-zero values is not standardized; use host logging if you need detail.
+ * game_frame: returns 0 on success; any non-zero value => error (host may quit).
+ * Meaning of non-zero values is not standardized; use host logging for detail.
  */
-
-game_t game_init();
+game_t  game_init();
 int32_t game_frame(game_t game, double dt);
-int32_t game_event(game_t game,
-    int32_t ev_type,
-    int32_t key_or_btn,
-    int32_t is_down,
-    int32_t is_repeat,
-    float mouse_x, float mouse_y,
-    float scroll_x, float scroll_y,
-    int32_t win_w, int32_t win_h);
+
+/*
+ * game_input_event — keyboard, text, mouse buttons, motion, scroll. Per-kind
+ * slot meanings are documented above next to G_EVENT_* values. Unused slots
+ * should be passed as 0.
+ */
+int32_t game_input_event(game_t game,
+    int32_t kind,
+    int32_t a, int32_t b, int32_t c, int32_t d,
+    float fx, float fy, float fz, float fw);
+
+/*
+ * game_window_event — window-level events (resize, dpi change, focus).
+ */
+int32_t game_window_event(game_t game,
+    int32_t kind,
+    int32_t w, int32_t h,
+    float fdpi);
+
 int32_t game_cleanup(game_t game);
 
 /*

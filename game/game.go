@@ -9,54 +9,14 @@ import (
 
 	"triggle/engine/backend"
 	emath "triggle/engine/emath"
+	"triggle/engine/event"
 	"triggle/engine/hostlog"
 	"triggle/engine/render"
 	"triggle/engine/text"
 	"triggle/engine/ui"
 )
 
-// Event types (match game_api.h)
-const (
-	EvUnknown     = 0
-	EvKeyDown     = 1
-	EvKeyUp       = 2
-	EvMouseDown   = 3
-	EvMouseUp     = 4
-	EvMouseMove   = 5
-	EvMouseScroll = 6
-	EvResize      = 7
-	EvText        = 8
-)
-
-// Editing key codes (match game_api.h GK_*). Character keys are not listed —
-// they arrive as UTF-32 codepoints via EvText.
-const (
-	gkEscape    = 28
-	gkEnter     = 29
-	gkBackspace = 30
-	gkDelete    = 31
-	gkLeft      = 32
-	gkRight     = 33
-	gkUp        = 34
-	gkDown      = 35
-	gkHome      = 36
-	gkEnd       = 37
-	gkTab       = 38
-)
-
 // game_frame: return 0 on success, non-zero on error (opaque to host).
-
-// Mouse buttons
-const (
-	MouseLeft   = 0
-	MouseRight  = 1
-	MouseMiddle = 2
-)
-
-// Modifier flags (match sokol SAPP_MODIFIER_*)
-const (
-	ModShift = 0x1
-)
 
 // Player colors
 var PlayerColors = [][4]float32{
@@ -249,6 +209,7 @@ func (g *Game) appendLogLine(s string) {
 }
 
 func (g *Game) update(dt float32) int32 {
+	g.drainEvents()
 	// Rebuild band mesh if needed
 	if g.bandMeshDirty {
 		if err := g.rebuildBandMesh(); err != nil {
@@ -452,163 +413,50 @@ func (g *Game) updateCamera() {
 	g.viewProj = proj.Mul4(view)
 }
 
-func (g *Game) handleEvent(
-	evType, keyOrBtn, isDown, isRepeat int32,
-	mouseX, mouseY, scrollX, scrollY float32,
-	winW, winH int32,
-) int32 {
-	if winW > 0 && winH > 0 {
-		g.winW = winW
-		g.winH = winH
-	}
+// drainEvents consumes all pending host events from event.DefaultQueue and
+// updates game state. Called once per frame from update(). Replaces the older
+// per-event scalar handleEvent — see engine/event for the typed model.
+func (g *Game) drainEvents() {
+	event.DefaultQueue.Drain(g.handleEvent)
+}
 
-	mods := isDown // isDown carries modifier flags for mouse events
-
-	switch evType {
-	case EvKeyDown, EvKeyUp:
-		key := gkToUIKey(keyOrBtn)
+func (g *Game) handleEvent(ev event.Event) {
+	switch ev.Kind {
+	case event.KindKey:
+		key := eventKeyToUIKey(ev.Key)
 		if key != ui.KeyUnknown {
 			g.uiInput.KeyEvents = append(g.uiInput.KeyEvents, ui.KeyEvent{
 				Key:    key,
-				Down:   evType == EvKeyDown,
-				Repeat: isRepeat&1 != 0,
-				Mods:   uint8((isRepeat >> 8) & 0xF),
+				Down:   ev.Down,
+				Repeat: ev.Repeat,
+				Mods:   uint8(ev.Mods),
 			})
 		}
-	case EvText:
-		cp := rune(keyOrBtn)
-		if cp > 0 && utf8.ValidRune(cp) {
+	case event.KindText:
+		if ev.Rune > 0 && utf8.ValidRune(ev.Rune) {
 			var buf [4]byte
-			n := utf8.EncodeRune(buf[:], cp)
+			n := utf8.EncodeRune(buf[:], ev.Rune)
 			g.uiInput.Text += string(buf[:n])
 		}
-	case EvMouseDown:
-		g.mouseX = mouseX
-		g.mouseY = mouseY
-		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
-		var uibit uint8
-		switch keyOrBtn {
-		case MouseLeft:
-			uibit = ui.MouseLeft
-		case MouseRight:
-			uibit = ui.MouseRight
-		case MouseMiddle:
-			uibit = ui.MouseMiddle
+	case event.KindMouseButton:
+		mx, my := ev.Pos[0], ev.Pos[1]
+		g.mouseX = mx
+		g.mouseY = my
+		g.uiInput.MousePos = ev.Pos
+		uibit := mouseButtonToUIBit(ev.Button)
+		if ev.Down {
+			g.handleMouseDown(ev, mx, my, uibit)
+		} else {
+			g.handleMouseUp(ev, mx, my, uibit)
 		}
-		g.uiInput.MouseDown |= uibit
-		g.uiInput.MousePressed |= uibit
-		block := g.uiBlocksMouse
-		if keyOrBtn == MouseMiddle || (keyOrBtn == MouseLeft && mods&ModShift != 0) {
-			if !block {
-				g.middleDown = true
-				g.dragLastX = mouseX
-				g.dragLastY = mouseY
-				g.dragDist = 0
-			}
-		} else if keyOrBtn == MouseLeft && !block {
-			g.leftDown = true
-			g.dragLastX = mouseX
-			g.dragLastY = mouseY
-			g.dragDist = 0
-			r := g.screenToRay(mouseX, mouseY)
-			origin := [3]float32{r.origin[0], r.origin[1], r.origin[2]}
-			dir := [3]float32{r.dir[0], r.dir[1], r.dir[2]}
-			g.dragStartPeg = g.board.PickPeg(origin, dir)
-		}
-	case EvMouseUp:
-		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
-		var uibit uint8
-		switch keyOrBtn {
-		case MouseLeft:
-			uibit = ui.MouseLeft
-		case MouseRight:
-			uibit = ui.MouseRight
-		case MouseMiddle:
-			uibit = ui.MouseMiddle
-		}
-		g.uiInput.MouseReleased |= uibit
-		g.uiInput.MouseDown &^= uibit
-
-		block := g.uiBlocksMouse
-		if keyOrBtn == MouseMiddle || (keyOrBtn == MouseLeft && g.middleDown) {
-			g.middleDown = false
-		} else if keyOrBtn == MouseLeft {
-			if !block {
-				if g.leftDown && g.dragDist < 5.0 {
-					g.doClick(mouseX, mouseY)
-				} else if g.leftDown && g.dragStartPeg >= 0 && g.hoveredPeg >= 0 && g.dragStartPeg != g.hoveredPeg {
-					g.tryPlaceBand(g.dragStartPeg, g.hoveredPeg)
-				}
-			}
-			g.leftDown = false
-			g.dragStartPeg = -1
-			g.hoveredPeg = -1
-			g.previewLine = nil
-		}
-	case EvMouseMove:
-		dx := mouseX - g.mouseX
-		dy := mouseY - g.mouseY
-		g.uiInput.MouseDelta = emath.Vec2{dx, dy}
-		g.mouseX = mouseX
-		g.mouseY = mouseY
-		g.uiInput.MousePos = emath.Vec2{mouseX, mouseY}
-		block := g.uiBlocksMouse
-		if block {
-			break
-		}
-		if g.middleDown {
-			dx := mouseX - g.dragLastX
-			dy := mouseY - g.dragLastY
-			g.dragDist += float32(math.Abs(float64(dx)) + math.Abs(float64(dy)))
-			if g.dragDist >= 5.0 {
-				g.camYaw -= dx * 0.005
-				g.camPitch += dy * 0.005
-				if g.camPitch > 1.5 {
-					g.camPitch = 1.5
-				}
-				if g.camPitch < -0.2 {
-					g.camPitch = -0.2
-				}
-				g.updateCamera()
-			}
-			g.dragLastX = mouseX
-			g.dragLastY = mouseY
-		}
-		if g.leftDown {
-			dx := mouseX - g.dragLastX
-			dy := mouseY - g.dragLastY
-			g.dragDist += float32(math.Abs(float64(dx)) + math.Abs(float64(dy)))
-			g.dragLastX = mouseX
-			g.dragLastY = mouseY
-		}
-		// Hover detection for drag or click-click
-		if g.leftDown && g.dragStartPeg >= 0 || g.selectedPeg >= 0 {
-			r := g.screenToRay(mouseX, mouseY)
-			origin := [3]float32{r.origin[0], r.origin[1], r.origin[2]}
-			dir := [3]float32{r.dir[0], r.dir[1], r.dir[2]}
-			g.hoveredPeg = g.board.PickPeg(origin, dir)
-			// Update preview
-			startPeg := g.dragStartPeg
-			if startPeg < 0 {
-				startPeg = g.selectedPeg
-			}
-			if startPeg >= 0 && g.hoveredPeg >= 0 && startPeg != g.hoveredPeg {
-				line := g.board.FindLine(startPeg, g.hoveredPeg)
-				if line != nil && g.board.CanPlace(line) {
-					g.previewLine = line
-				} else {
-					g.previewLine = nil
-				}
-			} else {
-				g.previewLine = nil
-			}
-		}
-	case EvMouseScroll:
-		g.uiInput.ScrollDelta = g.uiInput.ScrollDelta.Add(emath.Vec2{scrollX, scrollY})
+	case event.KindMouseMove:
+		g.handleMouseMove(ev)
+	case event.KindMouseScroll:
+		g.uiInput.ScrollDelta = g.uiInput.ScrollDelta.Add(ev.Delta)
 		if g.uiBlocksMouse {
-			break
+			return
 		}
-		g.camDist -= scrollY * 0.5
+		g.camDist -= ev.Delta[1] * 0.5
 		if g.camDist < 2.0 {
 			g.camDist = 2.0
 		}
@@ -616,12 +464,134 @@ func (g *Game) handleEvent(
 			g.camDist = 30.0
 		}
 		g.updateCamera()
-	case EvResize:
-		if winW > 0 && winH > 0 {
-			g.winW = winW
-			g.winH = winH
+	case event.KindResize, event.KindDPIChanged:
+		// Viewport refactor (PR 2) will route this through engine/ui and
+		// engine/render. For now keep the legacy single-source-of-truth.
+		if ev.Size.W > 0 && ev.Size.H > 0 {
+			g.winW = ev.Size.W
+			g.winH = ev.Size.H
 			g.updateCamera()
 		}
+	case event.KindFocus:
+		// No game-level reaction yet; UI focus state is tracked separately.
+	}
+}
+
+func (g *Game) handleMouseDown(ev event.Event, mx, my float32, uibit uint8) {
+	g.uiInput.MouseDown |= uibit
+	g.uiInput.MousePressed |= uibit
+	if g.uiBlocksMouse {
+		return
+	}
+	if ev.Button == event.MouseMiddle ||
+		(ev.Button == event.MouseLeft && ev.Mods&event.ModShift != 0) {
+		g.middleDown = true
+		g.dragLastX = mx
+		g.dragLastY = my
+		g.dragDist = 0
+		return
+	}
+	if ev.Button == event.MouseLeft {
+		g.leftDown = true
+		g.dragLastX = mx
+		g.dragLastY = my
+		g.dragDist = 0
+		r := g.screenToRay(mx, my)
+		origin := [3]float32{r.origin[0], r.origin[1], r.origin[2]}
+		dir := [3]float32{r.dir[0], r.dir[1], r.dir[2]}
+		g.dragStartPeg = g.board.PickPeg(origin, dir)
+	}
+}
+
+func (g *Game) handleMouseUp(ev event.Event, mx, my float32, uibit uint8) {
+	g.uiInput.MouseReleased |= uibit
+	g.uiInput.MouseDown &^= uibit
+
+	block := g.uiBlocksMouse
+	if ev.Button == event.MouseMiddle || (ev.Button == event.MouseLeft && g.middleDown) {
+		g.middleDown = false
+		return
+	}
+	if ev.Button == event.MouseLeft {
+		if !block {
+			if g.leftDown && g.dragDist < 5.0 {
+				g.doClick(mx, my)
+			} else if g.leftDown && g.dragStartPeg >= 0 && g.hoveredPeg >= 0 && g.dragStartPeg != g.hoveredPeg {
+				g.tryPlaceBand(g.dragStartPeg, g.hoveredPeg)
+			}
+		}
+		g.leftDown = false
+		g.dragStartPeg = -1
+		g.hoveredPeg = -1
+		g.previewLine = nil
+	}
+}
+
+func (g *Game) handleMouseMove(ev event.Event) {
+	mx, my := ev.Pos[0], ev.Pos[1]
+	g.uiInput.MouseDelta = ev.Delta
+	g.mouseX = mx
+	g.mouseY = my
+	g.uiInput.MousePos = ev.Pos
+	if g.uiBlocksMouse {
+		return
+	}
+	if g.middleDown {
+		dx := mx - g.dragLastX
+		dy := my - g.dragLastY
+		g.dragDist += float32(math.Abs(float64(dx)) + math.Abs(float64(dy)))
+		if g.dragDist >= 5.0 {
+			g.camYaw -= dx * 0.005
+			g.camPitch += dy * 0.005
+			if g.camPitch > 1.5 {
+				g.camPitch = 1.5
+			}
+			if g.camPitch < -0.2 {
+				g.camPitch = -0.2
+			}
+			g.updateCamera()
+		}
+		g.dragLastX = mx
+		g.dragLastY = my
+	}
+	if g.leftDown {
+		dx := mx - g.dragLastX
+		dy := my - g.dragLastY
+		g.dragDist += float32(math.Abs(float64(dx)) + math.Abs(float64(dy)))
+		g.dragLastX = mx
+		g.dragLastY = my
+	}
+	// Hover detection for drag or click-click
+	if g.leftDown && g.dragStartPeg >= 0 || g.selectedPeg >= 0 {
+		r := g.screenToRay(mx, my)
+		origin := [3]float32{r.origin[0], r.origin[1], r.origin[2]}
+		dir := [3]float32{r.dir[0], r.dir[1], r.dir[2]}
+		g.hoveredPeg = g.board.PickPeg(origin, dir)
+		startPeg := g.dragStartPeg
+		if startPeg < 0 {
+			startPeg = g.selectedPeg
+		}
+		if startPeg >= 0 && g.hoveredPeg >= 0 && startPeg != g.hoveredPeg {
+			line := g.board.FindLine(startPeg, g.hoveredPeg)
+			if line != nil && g.board.CanPlace(line) {
+				g.previewLine = line
+			} else {
+				g.previewLine = nil
+			}
+		} else {
+			g.previewLine = nil
+		}
+	}
+}
+
+func mouseButtonToUIBit(b event.MouseButton) uint8 {
+	switch b {
+	case event.MouseLeft:
+		return ui.MouseLeft
+	case event.MouseRight:
+		return ui.MouseRight
+	case event.MouseMiddle:
+		return ui.MouseMiddle
 	}
 	return 0
 }
@@ -886,29 +856,32 @@ func (g *Game) rebuildPreviewMesh() error {
 	return nil
 }
 
-func gkToUIKey(gk int32) ui.KeyCode {
-	switch gk {
-	case gkEscape:
+// eventKeyToUIKey maps the engine's portable key id to the UI layer's editing
+// key enum. Character keys (A..Z, Space) are not relevant to the UI text
+// widgets — they arrive as runes via event.KindText.
+func eventKeyToUIKey(k event.Key) ui.KeyCode {
+	switch k {
+	case event.KeyEscape:
 		return ui.KeyEscape
-	case gkEnter:
+	case event.KeyEnter:
 		return ui.KeyEnter
-	case gkBackspace:
+	case event.KeyBackspace:
 		return ui.KeyBackspace
-	case gkDelete:
+	case event.KeyDelete:
 		return ui.KeyDelete
-	case gkLeft:
+	case event.KeyLeft:
 		return ui.KeyLeft
-	case gkRight:
+	case event.KeyRight:
 		return ui.KeyRight
-	case gkUp:
+	case event.KeyUp:
 		return ui.KeyUp
-	case gkDown:
+	case event.KeyDown:
 		return ui.KeyDown
-	case gkHome:
+	case event.KeyHome:
 		return ui.KeyHome
-	case gkEnd:
+	case event.KeyEnd:
 		return ui.KeyEnd
-	case gkTab:
+	case event.KeyTab:
 		return ui.KeyTab
 	}
 	return ui.KeyUnknown
