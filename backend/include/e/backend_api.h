@@ -8,6 +8,7 @@ extern "C" {
 
 typedef int32_t backend_t;
 typedef int32_t mesh_t;
+typedef int32_t buffer_t;
 typedef int32_t shader_t;
 typedef int32_t pipeline_t;
 typedef int32_t image_t;
@@ -117,6 +118,10 @@ typedef struct backend_text_run_bitmap_t {
 #define BACKEND_INDEX_UINT16 1
 #define BACKEND_INDEX_UINT32 2
 
+/* Vertex buffer step functions */
+#define BACKEND_STEP_PER_VERTEX   0
+#define BACKEND_STEP_PER_INSTANCE 1
+
 /* Pixel formats */
 #define BACKEND_PIXFMT_DEPTH 0
 #define BACKEND_PIXFMT_RGBA8 1
@@ -144,6 +149,11 @@ mesh_t   backend_mesh_create(backend_t e,
              void* indices, int32_t idx_bytes);
 void     backend_mesh_destroy(mesh_t m);
 void     backend_mesh_get_info(mesh_t m, backend_mesh_info_t* out_info);
+
+/* Dynamic vertex buffer (for per-instance attrs) */
+buffer_t backend_buffer_create(backend_t e, int32_t size_bytes);
+void     backend_buffer_update(backend_t e, buffer_t buf, const void* data, int32_t size);
+void     backend_buffer_destroy(backend_t e, buffer_t buf);
 
 /* glTF — primitive handles match Engine::gltf_load order (all mesh primitives) */
 int32_t  backend_gltf_load(backend_t e, const char* path);

@@ -99,9 +99,18 @@ func BuildShaderDesc(d ShaderDesc) []byte {
 	// FS
 	appendU32(uint32(len(d.FS)))
 	appendStr(d.FS)
-	// Attrs
-	buf = append(buf, byte(len(d.Attrs)))
+	// Attrs — index in slice is the shader location; empty name = skip slot.
+	nonEmpty := 0
+	for _, name := range d.Attrs {
+		if name != "" {
+			nonEmpty++
+		}
+	}
+	buf = append(buf, byte(nonEmpty))
 	for i, name := range d.Attrs {
+		if name == "" {
+			continue
+		}
 		buf = append(buf, byte(i), byte(len(name)))
 		appendStr(name)
 	}

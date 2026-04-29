@@ -10,6 +10,11 @@ import (
 	"triggle/engine/shader"
 )
 
+// Each WASM cached line owns one GPU image. Sokol's default image_pool_size
+// is 128; we reserve headroom for the shadow map, draw2d white texture, and
+// material textures. 96 leaves ~30 slots of margin.
+const maxCachedLines = 96
+
 // platState on WASM: one shared sampler. There is no shapable glyph atlas on
 // the browser path; each cached line owns its own GPU texture (destroyed on
 // eviction).
@@ -60,7 +65,7 @@ func (srv *textServer) buildCachedLine(bitmap backend.TextRunBitmap) (*cachedLin
 		img:  img,
 		samp: srv.plat.sampler,
 		glyphs: []lineQuad{{
-			Dst: emath.Rect{X: 0, Y: 0, W: bitmap.WidthPx, H: bitmap.HeightPx},
+			Dst: emath.Rect{X: 0, Y: 0, W: float32(bitmap.WidthPx), H: float32(bitmap.HeightPx)},
 			UV:  emath.UVRect{U0: 0, V0: 0, U1: 1, V1: 1},
 		}},
 		size:       emath.Vec2{float32(bitmap.WidthPx), float32(bitmap.HeightPx)},
@@ -105,7 +110,7 @@ func (srv *textServer) shapeVolatileLine(f *fontEntry, owner uint32, s string, p
 
 	// Reuse existing image handle when dimensions match (avoids GPU alloc).
 	if prev != nil && prev.perLineImg && prev.img >= 0 && len(prev.glyphs) > 0 &&
-		prev.glyphs[0].Dst.W == bitmap.WidthPx && prev.glyphs[0].Dst.H == bitmap.HeightPx {
+		prev.glyphs[0].Dst.W == float32(bitmap.WidthPx) && prev.glyphs[0].Dst.H == float32(bitmap.HeightPx) {
 		srv.b.ImageUpdateRGBA8BackendPtr(prev.img, bitmap.WidthPx, bitmap.HeightPx, bitmap.PixelsPtr, numBytes)
 		return prev, nil
 	}
@@ -119,7 +124,7 @@ func (srv *textServer) shapeVolatileLine(f *fontEntry, owner uint32, s string, p
 		img:  img,
 		samp: srv.plat.sampler,
 		glyphs: []lineQuad{{
-			Dst: emath.Rect{X: 0, Y: 0, W: bitmap.WidthPx, H: bitmap.HeightPx},
+			Dst: emath.Rect{X: 0, Y: 0, W: float32(bitmap.WidthPx), H: float32(bitmap.HeightPx)},
 			UV:  emath.UVRect{U0: 0, V0: 0, U1: 1, V1: 1},
 		}},
 		size:       emath.Vec2{float32(bitmap.WidthPx), float32(bitmap.HeightPx)},

@@ -23,6 +23,12 @@ type BackendHost struct {
 		Info    func(m int32, out Ptr)
 	}
 
+	Buffer struct {
+		Create  func(e int32, sizeBytes int32) int32
+		Update  func(e int32, buf int32, data Ptr, size int32)
+		Destroy func(e int32, buf int32)
+	}
+
 	Gltf struct {
 		Load           func(e int32, path Ptr) int32
 		Unload         func(e int32, asset int32)
@@ -108,6 +114,15 @@ func _backend_mesh_destroy(m int32)
 
 //go:wasmimport env backend_mesh_get_info
 func _backend_mesh_get_info(m int32, out uint32)
+
+//go:wasmimport env backend_buffer_create
+func _backend_buffer_create(e int32, sizeBytes int32) int32
+
+//go:wasmimport env backend_buffer_update
+func _backend_buffer_update(e int32, buf int32, data uint32, size int32)
+
+//go:wasmimport env backend_buffer_destroy
+func _backend_buffer_destroy(e int32, buf int32)
 
 //go:wasmimport env backend_gltf_load
 func _backend_gltf_load(e int32, path uint32) int32
@@ -206,6 +221,14 @@ func init() {
 	Host.Mesh.Destroy = func(m int32) { _backend_mesh_destroy(m) }
 	Host.Mesh.Info = func(m int32, out Ptr) { _backend_mesh_get_info(m, uint32(out)) }
 
+	Host.Buffer.Create = func(e int32, sizeBytes int32) int32 {
+		return _backend_buffer_create(e, sizeBytes)
+	}
+	Host.Buffer.Update = func(e int32, buf int32, data Ptr, size int32) {
+		_backend_buffer_update(e, buf, uint32(data), size)
+	}
+	Host.Buffer.Destroy = func(e int32, buf int32) { _backend_buffer_destroy(e, buf) }
+
 	Host.Gltf.Load = func(e int32, path Ptr) int32 {
 		return _backend_gltf_load(e, uint32(path))
 	}
@@ -274,8 +297,9 @@ func init() {
 }
 
 // TextInputBegin activates a host-owned text-input session bound to the rect
-// (x,y,w,h) in CSS logical pixels (high_dpi is not set; framebuffer coords ==
-// CSS px), seeded with utf8 value + caret byte offset.
+// (x,y,w,h) in framebuffer pixels, seeded with utf8 value + caret byte offset.
+// The WASM host divides by devicePixelRatio when positioning the hidden <input>
+// overlay, so the DOM stays in CSS pixels while the engine stays in fb px.
 // WASM: positions the hidden <input> overlay and focuses it.
 // Called once per focus-grant transition; idempotent re-calls reposition.
 func (e Backend) TextInputBegin(x, y, w, h int32, utf8 []byte, caretBytes int32) {

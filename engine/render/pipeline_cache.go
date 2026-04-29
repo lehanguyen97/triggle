@@ -11,8 +11,8 @@ type PipelineFamilyID int32
 // PipelineFamilyDesc describes a shader family without index type (runtime picks u16 vs u32 from mesh).
 type PipelineFamilyDesc struct {
 	Shader     int32
-	Stride     int32
-	Attrs      []int
+	Buffers    []VertexBufferLayout
+	Attrs      []VertexAttr
 	DepthCmp   int
 	DepthWrite bool
 	Cull       int
@@ -35,7 +35,7 @@ func NewPipelineFamilyCache(gpu backend.Backend) *PipelineFamilyCache {
 func (c *PipelineFamilyCache) RegisterPipelineFamily(desc PipelineFamilyDesc) PipelineFamilyID {
 	d16 := PipelineDesc{
 		Shader:     desc.Shader,
-		Stride:     desc.Stride,
+		Buffers:    desc.Buffers,
 		Attrs:      desc.Attrs,
 		DepthCmp:   desc.DepthCmp,
 		DepthWrite: desc.DepthWrite,

@@ -275,11 +275,12 @@
                             },
                             backend_text_input_begin: (x, y, w, h, utf8Ptr, utf8Len, caretBytes) => {
                                 const el = ensureTextInputEl();
-                                // Coordinates are in CSS logical pixels (high_dpi not set in sokol_main).
-                                el.style.left = x + 'px';
-                                el.style.top = y + 'px';
-                                el.style.width = w + 'px';
-                                el.style.height = h + 'px';
+                                // Coordinates arrive in framebuffer px (high_dpi enabled). Convert to CSS px.
+                                const s = window.devicePixelRatio || 1;
+                                el.style.left = (x / s) + 'px';
+                                el.style.top = (y / s) + 'px';
+                                el.style.width = (w / s) + 'px';
+                                el.style.height = (h / s) + 'px';
                                 const val = utf8Len > 0 ? utf8FromGame(utf8Ptr, utf8Len) : '';
                                 el.value = val;
                                 // Convert UTF-8 caret byte offset to UTF-16 code-unit offset.

@@ -69,6 +69,9 @@ int32_t Backend::cleanup() {
     for (auto& img : images) sg_destroy_image(img);
     for (auto& pip : pipelines) sg_destroy_pipeline(pip);
     for (auto& shd : shaders) sg_destroy_shader(shd);
+    for (auto& buf : buffers) {
+        if (buf.id != SG_INVALID_ID) sg_destroy_buffer(buf);
+    }
     for (auto& mesh : meshes) {
         if (mesh.num_indices > 0) {
             sg_destroy_buffer(mesh.bind.vertex_buffers[0]);
@@ -80,6 +83,7 @@ int32_t Backend::cleanup() {
     images.clear();
     pipelines.clear();
     shaders.clear();
+    buffers.clear();
     gltf_assets.clear();
     meshes.clear();
     sg_shutdown();

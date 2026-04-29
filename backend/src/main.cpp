@@ -51,13 +51,10 @@ EM_JS(int32_t, game_cleanup, (int32_t g), {
 #endif
 
 static int map_keycode(sapp_keycode kc) {
-    if (kc >= SAPP_KEYCODE_A && kc <= SAPP_KEYCODE_Z) {
-        return GK_A + (kc - SAPP_KEYCODE_A);
-    }
     switch (kc) {
-        case SAPP_KEYCODE_SPACE:     return GK_SPACE;
-        case SAPP_KEYCODE_ESCAPE:    return GK_ESCAPE;
         case SAPP_KEYCODE_ENTER:     return GK_ENTER;
+        case SAPP_KEYCODE_ESCAPE:    return GK_ESCAPE;
+        case SAPP_KEYCODE_TAB:       return GK_TAB;
         case SAPP_KEYCODE_BACKSPACE: return GK_BACKSPACE;
         case SAPP_KEYCODE_DELETE:    return GK_DELETE;
         case SAPP_KEYCODE_LEFT:      return GK_LEFT;
@@ -66,7 +63,6 @@ static int map_keycode(sapp_keycode kc) {
         case SAPP_KEYCODE_DOWN:      return GK_DOWN;
         case SAPP_KEYCODE_HOME:      return GK_HOME;
         case SAPP_KEYCODE_END:       return GK_END;
-        case SAPP_KEYCODE_TAB:       return GK_TAB;
         default:                     return GK_UNKNOWN;
     }
 }
@@ -78,9 +74,7 @@ static int32_t map_mods(uint32_t sokol_mods) {
 }
 
 static void send_resize(void) {
-    // dpi=1.0 because high_dpi is not enabled in sokol_main yet; the viewport
-    // refactor turns this on and replaces the literal with sapp_dpi_scale().
-    game_window_event(game, G_EVENT_RESIZE, sapp_width(), sapp_height(), 1.0f);
+    game_window_event(game, G_EVENT_RESIZE, sapp_width(), sapp_height(), sapp_dpi_scale());
 }
 
 void on_init(void) {
@@ -124,20 +118,23 @@ void on_event(const sapp_event* sev) {
             int32_t btn = (int32_t)sev->mouse_button;
             int32_t down = sev->type == SAPP_EVENTTYPE_MOUSE_DOWN ? 1 : 0;
             int32_t mods = map_mods(sev->modifiers);
+            float s = sapp_dpi_scale();
             game_input_event(game, G_EVENT_MOUSE_BUTTON, btn, down, mods, 0,
-                sev->mouse_x, sev->mouse_y, 0, 0);
+                sev->mouse_x * s, sev->mouse_y * s, 0, 0);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_MOVE: {
             int32_t mods = map_mods(sev->modifiers);
+            float s = sapp_dpi_scale();
             game_input_event(game, G_EVENT_MOUSE_MOVE, mods, 0, 0, 0,
-                sev->mouse_x, sev->mouse_y, sev->mouse_dx, sev->mouse_dy);
+                sev->mouse_x * s, sev->mouse_y * s, sev->mouse_dx * s, sev->mouse_dy * s);
             break;
         }
         case SAPP_EVENTTYPE_MOUSE_SCROLL: {
             int32_t mods = map_mods(sev->modifiers);
+            float s = sapp_dpi_scale();
             game_input_event(game, G_EVENT_MOUSE_SCROLL, mods, 0, 0, 0,
-                sev->mouse_x, sev->mouse_y, sev->scroll_x, sev->scroll_y);
+                sev->mouse_x * s, sev->mouse_y * s, sev->scroll_x * s, sev->scroll_y * s);
             break;
         }
         case SAPP_EVENTTYPE_RESIZED: {
@@ -172,6 +169,7 @@ sapp_desc sokol_main(int argc, char* argv[]) {
         .event_cb = on_event,
         .width = width,
         .height = height,
+        .high_dpi = true,
         .window_title = "Triggle",
         .logger = {.func = slog_func},
         .html5_canvas_resize = false,

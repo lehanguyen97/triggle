@@ -5,13 +5,11 @@ import (
 
 	"triggle/engine/emath"
 	"triggle/engine/text"
-	"triggle/engine/ui/cmd"
-	"triggle/engine/ui/theme"
 )
 
 const (
-	textInputPadX int32 = 4
-	textInputPadY int32 = 3
+	textInputPadX float32 = 4
+	textInputPadY float32 = 3
 )
 
 const (
@@ -28,15 +26,22 @@ func caretVisible(clock, lastEditAt float32) bool {
 	return int(phase/caretBlinkHalfPhase)%2 == 0
 }
 
-// TextInputHeight is the outer pixel height of one row.
-func TextInputHeight(font *text.Font, pxSize int32) int32 {
+// TextInputHeight is the outer logical-pixel height of one row.
+// Converts the font's physical-px metrics to lp using scale.
+func TextInputHeight(font *text.Font, pxSize int32, scale float32) float32 {
+	if scale <= 0 {
+		scale = 1
+	}
+	lpSize := float32(pxSize) / scale
 	if font == nil {
-		return pxSize + textInputPadY*2
+		return lpSize + textInputPadY*2
 	}
 	m := font.Metrics(pxSize)
-	h := m.Ascent + m.Descent
+	asc := m.Ascent / scale
+	dsc := m.Descent / scale
+	h := asc + dsc
 	if h <= 0 {
-		h = pxSize
+		h = lpSize
 	}
 	return h + textInputPadY*2
 }
@@ -44,26 +49,32 @@ func TextInputHeight(font *text.Font, pxSize int32) int32 {
 // TextInput is a single-line text field.
 type TextInput struct {
 	BaseNode
-	parent Node
 
 	Value    string
+	Binding  StringBinding
 	MaxBytes int
 	OnChange func(string)
 	OnSubmit func(string)
+	Style    TextStyle
 
 	// Internal editing state; Value tracks buf after each Event.
-	inited  bool
-	buf     []byte
-	caret   int
-	wasFocus       bool
-	lastPaintFocus bool
-	blinkClock     float32
-	lastEditAt float32
+	inited             bool
+	buf                []byte
+	caret              int
+	wasFocus           bool
+	lastPaintFocus     bool
+	blinkClock         float32
+	lastEditAt         float32
 	lastCaret, lastLen int
-	scrollX int32
-	caretW         int32
-	caretCachedAt  int
-	caretCachedLen int
+	scrollX            float32
+	caretW             float32
+	caretCachedAt      int
+	caretCachedLen     int
+}
+
+type StringBinding struct {
+	Get func() string
+	Set func(string)
 }
 
 // SetValue replaces the text and reseeds the caret; does not run OnChange.
@@ -90,12 +101,16 @@ func (t *TextInput) Children() []Node { return nil }
 // Measure implements Node.
 func (t *TextInput) Measure(c Constraints) Size {
 	_ = c
-	if t.app == nil || t.app.font == nil {
+	if t.app == nil {
 		return Size{}
 	}
 	t.ensureInit()
 	cn := normConstraints(c)
-	h := TextInputHeight(t.app.font, t.app.theme.BodyPx)
+	style := resolveRootTextStyle(t.app, t.Style)
+	if style.Font == nil {
+		return Size{}
+	}
+	h := TextInputHeight(style.Font, style.SizePx, t.app.vpState.UIScale)
 	return Size{W: cn.MaxW, H: h}
 }
 
@@ -106,7 +121,7 @@ func (t *TextInput) Place(outer emath.Rect) {
 
 // Event implements Node (only meaningful when App routes focus here).
 func (t *TextInput) Event(_ *Event, ec *EventCtx) bool {
-	if t.app == nil || t.app.font == nil {
+	if t.app == nil || t.app.Font() == nil {
 		return false
 	}
 	t.ensureInit()
@@ -148,15 +163,9 @@ func (t *TextInput) Event(_ *Event, ec *EventCtx) bool {
 		}
 		t.lastCaret = t.caret
 		t.lastLen = len(t.buf)
+		t.fireSubmitOnEnter(&ec.Frame)
 		for _, ev := range ec.Frame.KeyEvents {
-			if !ev.Down {
-				continue
-			}
-			if ev.Key == KeyEnter {
-				if t.OnSubmit != nil {
-					t.OnSubmit(string(t.buf))
-				}
-			} else if ev.Key == KeyEscape {
+			if ev.Down && ev.Key == KeyEscape {
 				ec.App.setFocusNode(nil)
 			}
 		}
@@ -164,16 +173,49 @@ func (t *TextInput) Event(_ *Event, ec *EventCtx) bool {
 		t.blinkClock = 0
 	}
 
-	prev := t.Value
-	t.Value = string(t.buf)
-	if t.Value != prev && t.OnChange != nil {
-		t.OnChange(t.Value)
-	}
+	t.applyEdits()
 	t.wasFocus = focused
 	return true
 }
 
+// applyEdits propagates the current buffer to Value, then notifies Binding.Set
+// and OnChange when the value actually changed.
+func (t *TextInput) applyEdits() {
+	prev := t.Value
+	t.Value = string(t.buf)
+	if t.Binding.Set != nil && t.Value != prev {
+		t.Binding.Set(t.Value)
+	}
+	if t.Value != prev && t.OnChange != nil {
+		t.OnChange(t.Value)
+	}
+}
+
+// fireSubmitOnEnter calls OnSubmit once per Enter keydown in frame, with the
+// current pre-applyEdits buffer. Caller is responsible for any post-submit
+// buffer reset (see ChatBox.handleSubmit).
+func (t *TextInput) fireSubmitOnEnter(frame *InputFrame) {
+	if t.OnSubmit == nil || frame == nil {
+		return
+	}
+	for _, ev := range frame.KeyEvents {
+		if ev.Down && ev.Key == KeyEnter {
+			t.OnSubmit(string(t.buf))
+		}
+	}
+}
+
 func (t *TextInput) ensureInit() {
+	if t.Binding.Get != nil {
+		v := t.Binding.Get()
+		if !t.inited || v != t.Value {
+			t.Value = v
+			t.buf = append(t.buf[:0], v...)
+			if t.caret > len(t.buf) {
+				t.caret = len(t.buf)
+			}
+		}
+	}
 	if t.inited {
 		return
 	}
@@ -186,37 +228,40 @@ func (t *TextInput) ensureInit() {
 
 // Paint implements Node.
 func (t *TextInput) Paint(pc *PaintCtx) {
-	if t.app == nil || t.app.font == nil {
+	if t.app == nil {
 		return
 	}
 	t.ensureInit()
 	af := t.app
 	r := t.rect
-	lineH := TextInputHeight(af.font, t.app.theme.BodyPx) - textInputPadY*2
+	style := resolveRootTextStyle(t.app, t.Style)
+	if style.Font == nil {
+		return
+	}
+	px := style.SizePx
+	lineH := TextInputHeight(style.Font, px, t.app.vpState.UIScale) - textInputPadY*2
 	foc := af.focus == t
 	prevPaint := t.lastPaintFocus
 	if prevPaint && !foc {
-		af.font.DropVolatile(uint32(t.WidgetID()))
+		t.app.DropVolatileText(text.OwnerID(t.WidgetID()))
 	}
 	t.lastPaintFocus = foc
 
-	bgCol := t.app.theme.Colors[theme.ColorBase]
+	bgCol := t.app.theme.Colors[ColorBase]
 	if bgCol.A == 0 {
-		bgCol = cmd.Color{R: 22, G: 22, B: 28, A: 255}
+		bgCol = emath.Color{R: 22, G: 22, B: 28, A: 255}
 	}
 	if foc {
-		bgCol = cmd.Color{R: 36, G: 38, B: 54, A: 255}
+		bgCol = emath.Color{R: 36, G: 38, B: 54, A: 255}
 	}
-	pc.Enc.QuadSolid(r, bgCol)
+	pc.Rect(r, bgCol)
 
-	col := t.app.theme.Colors[theme.ColorText]
-	tc := text.Color{R: col.R, G: col.G, B: col.B, A: col.A}
+	col := style.Color
 	textY := r.Y + textInputPadY
 	contentW := r.W - textInputPadX*2
 	if contentW < 0 {
 		contentW = 0
 	}
-	px := t.app.theme.BodyPx
 
 	caret := t.caret
 	if caret > len(t.buf) {
@@ -226,7 +271,7 @@ func (t *TextInput) Paint(pc *PaintCtx) {
 		if caret != t.caretCachedAt || len(t.buf) != t.caretCachedLen {
 			t.caretCachedAt = caret
 			t.caretCachedLen = len(t.buf)
-			t.caretW = int32(af.font.Measure(string(t.buf[:caret]), px)[0])
+			t.caretW = t.app.MeasureText(string(t.buf[:caret]), t.Style).Width
 		}
 	} else {
 		t.caretW = 0
@@ -234,7 +279,7 @@ func (t *TextInput) Paint(pc *PaintCtx) {
 		t.caretCachedLen = len(t.buf)
 	}
 
-	totalW := int32(af.font.Measure(string(t.buf), px)[0])
+	totalW := t.app.MeasureText(string(t.buf), t.Style).Width
 	if t.caretW-t.scrollX < 0 {
 		t.scrollX = t.caretW
 	} else if t.caretW-t.scrollX > contentW {
@@ -252,19 +297,19 @@ func (t *TextInput) Paint(pc *PaintCtx) {
 	}
 
 	clipR := emath.Rect{X: r.X + textInputPadX, Y: r.Y, W: contentW, H: r.H}
-	pc.Enc.PushClip(clipR)
+	pc.PushClip(clipR)
 	textX := r.X + textInputPadX - t.scrollX
 	if foc {
-		af.font.DrawVolatile(pc.Enc, uint32(t.WidgetID()), string(t.buf), textX, textY, px, tc)
+		pc.VolatileText(text.OwnerID(t.WidgetID()), string(t.buf), t.Style, textX, textY)
 	} else {
-		af.font.Draw(pc.Enc, string(t.buf), textX, textY, px, tc)
+		pc.Text(string(t.buf), t.Style, textX, textY)
 	}
 	if foc && caretVisible(t.blinkClock, t.lastEditAt) {
 		caretX := r.X + textInputPadX + t.caretW - t.scrollX
-		quad := cmd.Color{R: col.R, G: col.G, B: col.B, A: col.A}
-		pc.Enc.QuadSolid(emath.Rect{X: caretX, Y: textY, W: 1, H: lineH}, quad)
+		quad := col
+		pc.Rect(emath.Rect{X: caretX, Y: textY, W: 1, H: lineH}, quad)
 	}
-	pc.Enc.PopClip()
+	pc.PopClip()
 
 }
 

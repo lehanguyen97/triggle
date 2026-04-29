@@ -6,7 +6,12 @@ import (
 	"fmt"
 
 	"triggle/engine/backend"
+	"triggle/engine/emath"
 )
+
+// Native lines share one glyph atlas; the cache holds quad metadata, not
+// per-line GPU images, so the cap is comfortable.
+const maxCachedLines = 256
 
 // platState on native: one shared glyph atlas + sampler.
 type platState struct {
@@ -39,7 +44,7 @@ func (srv *textServer) shapeLine(f *fontEntry, s string, pxSize int32) (*cachedL
 	if atlas == nil {
 		return nil, fmt.Errorf("text: nil atlas")
 	}
-	glyphs, size, err := atlas.shapeRun(h, s, ascent)
+	glyphs, size, err := atlas.shapeRun(h, s, emath.RoundToI32(ascent))
 	if err != nil {
 		return nil, err
 	}

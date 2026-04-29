@@ -154,13 +154,13 @@ func (a *glyphAtlas) shapeRun(h int32, s string, ascentPx int32) ([]lineQuad, em
 			penX += glyph.XAdvance26_6
 			continue
 		}
-		x0 := (penX+glyph.XOffset26_6)/64.0 + entry.bitmap.BearingXPx
-		y0 := ascentPx - entry.bitmap.BearingYPx - glyph.YOffset26_6/64.0
+		x0 := (penX+glyph.XOffset26_6)/64 + entry.bitmap.BearingXPx
+		y0 := ascentPx - entry.bitmap.BearingYPx - glyph.YOffset26_6/64
 		w := entry.bitmap.WidthPx
 		hgt := entry.bitmap.HeightPx
 
 		out = append(out, lineQuad{
-			Dst: emath.Rect{X: x0, Y: y0, W: w, H: hgt},
+			Dst: emath.Rect{X: float32(x0), Y: float32(y0), W: float32(w), H: float32(hgt)},
 			UV: emath.UVRect{
 				U0: float32(entry.x) / atlasF,
 				V0: float32(entry.y) / atlasF,
@@ -204,5 +204,5 @@ func normalizeLineQuads(glyphs []lineQuad) ([]lineQuad, emath.Vec2) {
 		g.Dst.Y -= minY
 		out[i] = g
 	}
-	return out, emath.Vec2{float32(maxX - minX), float32(maxY - minY)}
+	return out, emath.Vec2{maxX - minX, maxY - minY}
 }

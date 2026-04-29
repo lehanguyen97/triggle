@@ -1,8 +1,7 @@
-// Package text is the renderer-agnostic text pipeline. Shape, lay out, and emit
-// textured quads into a caller-supplied QuadSink. Public API speaks framebuffer
-// pixels with a top-left origin; size is passed per draw (Godot-shape). A
-// package-private TextServer (one per backend) owns the glyph atlas, per-size
-// backend font handles, and the LRU-cached shaped lines — callers see only *Font.
+// Package text is the renderer-agnostic text pipeline. It loads fonts, measures
+// text, and returns reusable textured lines in framebuffer pixels with a
+// top-left origin. A package-private TextServer (one per backend) owns the glyph
+// atlas, per-size backend font handles, and the LRU-cached shaped lines.
 //
 // Native path: HarfBuzz + FreeType + shared RGBA8 glyph atlas.
 // WASM path:   per-line browser raster, one GPU texture per cached line.
@@ -13,22 +12,53 @@ import (
 
 	"triggle/engine/backend"
 	"triggle/engine/emath"
+	"triggle/engine/render"
 )
 
 // Color is straight RGBA8; the UI shader multiplies it with the atlas sample.
-type Color struct {
-	R, G, B, A uint8
+type Color = emath.Color
+
+type FontID string
+
+const FontDefault FontID = "default"
+
+type OwnerID uint32
+
+type WrapMode int32
+
+const (
+	WrapNone WrapMode = iota
+)
+
+type Align int32
+
+const (
+	AlignStart Align = iota
+)
+
+type Options struct {
+	SizePx int32
+	MaxW   int32
+	Wrap   WrapMode
+	Align  Align
 }
 
-// Metrics is pixel-space font metrics at a given size.
+// Metrics is pixel-space font metrics at a given size or for a laid-out string.
 type Metrics struct {
-	Ascent, Descent, LineHeight int32
+	Width, Height               float32
+	Ascent, Descent, LineHeight float32
 }
 
-// QuadSink receives textured quads from Font.Draw. The UI command encoder is
-// one sink; a future world-space sink may be another.
-type QuadSink interface {
-	AddTexturedQuad(image, sampler int32, dst emath.Rect, uv emath.UVRect, color Color)
+type Line struct {
+	Metrics  Metrics
+	Segments []Segment
+}
+
+type Segment struct {
+	Image   render.ImageHandle
+	Sampler render.SamplerHandle
+	Dst     emath.Rect
+	UV      emath.UVRect
 }
 
 // Font is a loaded TTF handle into the per-backend TextServer. Cheap to pass
@@ -37,6 +67,158 @@ type QuadSink interface {
 type Font struct {
 	srv *textServer
 	id  int32
+}
+
+// FontSet owns the opened fonts for one backend and dedupes by path so callers
+// can use stable IDs without accidentally opening the same font twice.
+type FontSet struct {
+	backend backend.Backend
+	fonts   map[FontID]*Font
+	paths   map[FontID]string
+	byPath  map[string]*Font
+}
+
+func NewFontSet(b backend.Backend) *FontSet {
+	return &FontSet{
+		backend: b,
+		fonts:   make(map[FontID]*Font),
+		paths:   make(map[FontID]string),
+		byPath:  make(map[string]*Font),
+	}
+}
+
+func (fs *FontSet) Open(id FontID, path string) (*Font, error) {
+	if fs == nil {
+		return nil, fmt.Errorf("text: nil font set")
+	}
+	if id == "" {
+		return nil, fmt.Errorf("text: empty font id")
+	}
+	if path == "" {
+		return nil, fmt.Errorf("text: empty font path")
+	}
+	if old := fs.fonts[id]; old != nil {
+		if fs.paths[id] == path {
+			return old, nil
+		}
+		fs.releaseID(id)
+	}
+	if f := fs.byPath[path]; f != nil {
+		fs.fonts[id] = f
+		fs.paths[id] = path
+		return f, nil
+	}
+	f, err := OpenFont(fs.backend, path)
+	if err != nil {
+		return nil, err
+	}
+	fs.fonts[id] = f
+	fs.paths[id] = path
+	fs.byPath[path] = f
+	return f, nil
+}
+
+func (fs *FontSet) Font(id FontID) *Font {
+	if fs == nil {
+		return nil
+	}
+	if id == "" {
+		id = FontDefault
+	}
+	return fs.fonts[id]
+}
+
+func (fs *FontSet) Close() {
+	if fs == nil {
+		return
+	}
+	seen := make(map[*Font]struct{}, len(fs.fonts))
+	for _, f := range fs.fonts {
+		if f == nil {
+			continue
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		f.Close()
+	}
+	clear(fs.fonts)
+	clear(fs.paths)
+	clear(fs.byPath)
+}
+
+// DropVolatile releases volatile cached lines owned by owner across all fonts in
+// the set.
+func (fs *FontSet) DropVolatile(owner OwnerID) {
+	if fs == nil || owner == 0 {
+		return
+	}
+	seen := make(map[*Font]struct{}, len(fs.fonts))
+	for _, f := range fs.fonts {
+		if f == nil {
+			continue
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		seen[f] = struct{}{}
+		f.DropVolatile(owner)
+	}
+}
+
+// BeginFrame/EndFrame give the shared text server a frame clock for cache-age
+// cleanup. Font resources remain loaded; only derived shaped/rastered entries
+// are eligible for sweeping.
+func (fs *FontSet) BeginFrame() {
+	if fs == nil {
+		return
+	}
+	seen := make(map[*textServer]struct{}, len(fs.fonts))
+	for _, f := range fs.fonts {
+		if f == nil || f.srv == nil {
+			continue
+		}
+		if _, ok := seen[f.srv]; ok {
+			continue
+		}
+		seen[f.srv] = struct{}{}
+		f.srv.beginFrame()
+	}
+}
+
+func (fs *FontSet) EndFrame() {
+	if fs == nil {
+		return
+	}
+	seen := make(map[*textServer]struct{}, len(fs.fonts))
+	for _, f := range fs.fonts {
+		if f == nil || f.srv == nil {
+			continue
+		}
+		if _, ok := seen[f.srv]; ok {
+			continue
+		}
+		seen[f.srv] = struct{}{}
+		f.srv.endFrame()
+	}
+}
+
+func (fs *FontSet) releaseID(id FontID) {
+	path := fs.paths[id]
+	font := fs.fonts[id]
+	delete(fs.fonts, id)
+	delete(fs.paths, id)
+	if font == nil || path == "" {
+		return
+	}
+	for _, p := range fs.paths {
+		if p == path {
+			return
+		}
+	}
+	delete(fs.byPath, path)
+	font.Close()
 }
 
 // OpenFont loads a TTF file and returns a Font that renders into backend b.
@@ -71,12 +253,13 @@ func (f *Font) Close() {
 	f.id = -1
 }
 
-// Measure returns the pixel width/height of s at pixelSize (0 on error/empty).
-func (f *Font) Measure(s string, pixelSize int32) emath.Vec2 {
+// MeasureLine returns the pixel bounds of s for opts without preparing render
+// resources.
+func (f *Font) MeasureLine(s string, opts Options) Metrics {
 	if f.srv == nil || s == "" {
-		return emath.Vec2{}
+		return Metrics{}
 	}
-	return f.srv.measure(f.id, s, pixelSize)
+	return f.srv.measure(f.id, s, opts)
 }
 
 // Metrics returns font metrics at pixelSize.
@@ -87,28 +270,28 @@ func (f *Font) Metrics(pixelSize int32) Metrics {
 	return f.srv.metrics(f.id, pixelSize)
 }
 
-// Draw emits quads for s into sink; (x, y) is the top-left of the line box.
-func (f *Font) Draw(sink QuadSink, s string, x, y, pixelSize int32, color Color) {
-	if f.srv == nil || sink == nil || s == "" {
-		return
+// Line returns a cached renderable text line.
+func (f *Font) Line(s string, opts Options) *Line {
+	if f.srv == nil || s == "" {
+		return nil
 	}
-	f.srv.draw(f.id, s, x, y, pixelSize, color, sink)
+	return f.srv.line(f.id, s, opts)
 }
 
-// DrawVolatile draws s without inserting it into the shared shaped-line cache.
+// VolatileLine returns a renderable line outside the shared shaped-line cache.
 // Intended for rapidly-changing UI text (e.g. active text inputs). The server
 // keeps only the latest run per owner and destroys the previous one on change.
-func (f *Font) DrawVolatile(sink QuadSink, owner uint32, s string, x, y, pixelSize int32, color Color) {
-	if f.srv == nil || sink == nil || s == "" || owner == 0 {
-		return
+func (f *Font) VolatileLine(owner OwnerID, s string, opts Options) *Line {
+	if f.srv == nil || s == "" || owner == 0 {
+		return nil
 	}
-	f.srv.drawVolatile(f.id, owner, s, x, y, pixelSize, color, sink)
+	return f.srv.volatileLine(f.id, uint32(owner), s, opts)
 }
 
 // DropVolatile releases any volatile cached line(s) owned by owner.
-func (f *Font) DropVolatile(owner uint32) {
+func (f *Font) DropVolatile(owner OwnerID) {
 	if f.srv == nil || owner == 0 {
 		return
 	}
-	f.srv.dropVolatile(owner)
+	f.srv.dropVolatile(uint32(owner))
 }

@@ -28,15 +28,12 @@ enum {
   G_EVENT_FOCUS        = 8, /* w=focused (0/1) */
 };
 
-/* Key codes — mirror engine/event.Key. */
+/* Key codes — mirror engine/event.Key and engine/ui.KeyCode. */
 enum {
   GK_UNKNOWN = 0,
-  GK_A, GK_B, GK_C, GK_D, GK_E, GK_F, GK_G, GK_H, GK_I, GK_J,
-  GK_K, GK_L, GK_M, GK_N, GK_O, GK_P, GK_Q, GK_R, GK_S, GK_T,
-  GK_U, GK_V, GK_W, GK_X, GK_Y, GK_Z,
-  GK_SPACE,
-  GK_ESCAPE,
   GK_ENTER,
+  GK_ESCAPE,
+  GK_TAB,
   GK_BACKSPACE,
   GK_DELETE,
   GK_LEFT,
@@ -45,7 +42,6 @@ enum {
   GK_DOWN,
   GK_HOME,
   GK_END,
-  GK_TAB,
 };
 
 /* Mouse buttons — mirror engine/event.MouseButton. */

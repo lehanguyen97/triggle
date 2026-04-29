@@ -7,16 +7,17 @@
 //     a single 11-arg game_event(...) for every event kind. That signature is
 //     opaque (slot reuse, bit-packed mods), brittle (every new field churns
 //     the ABI), and bleeds into game code.
-//   - This package keeps the scalar transport private to the platform files
-//     (transport_native.go, transport_wasm.go) and exposes typed Events that
-//     game code drains from a per-frame Queue.
+//   - This package exposes a small scalar-slot decoder (Push*EventSlots) that
+//     platform export stubs (package main, for cgo/wasmexport) call into. Game
+//     code only sees typed Events drained from a per-frame Queue.
 //
 // Two transport entrypoints replace the old monolith:
 //   - game_input_event(kind, a, b, c, d, fx, fy)  — keys, mouse, text, scroll.
 //   - game_window_event(kind, w, h, fdpi)          — resize, dpi-changed, focus.
 //
-// Both unpack into a typed Event and call DefaultQueue.Push. The game reads
-// events via DefaultQueue.Drain in its frame loop.
+// Both unpack into a typed Event and call package-level Push, which routes to
+// the queue registered via SetActive (runtime.Host owns it). The game reads
+// events via package-level Drain in its frame loop.
 package event
 
 import "triggle/engine/emath"
@@ -36,27 +37,23 @@ const (
 	KindFocus       Kind = 8
 )
 
-// Key is a portable editing-key identifier. Character keys are not modeled;
-// they arrive as runes via KindText. Values are stable across the C ABI: the
-// host maps platform key codes onto these integers before dispatch.
+// Key is a portable editing-key identifier shared with ui.KeyCode. Character
+// keys are not modeled; they arrive as runes via KindText.
 type Key int32
 
 const (
 	KeyUnknown   Key = 0
-	KeyA         Key = 1
-	KeyZ         Key = 26 // letters occupy 1..26 (A..Z)
-	KeySpace     Key = 27
-	KeyEscape    Key = 28
-	KeyEnter     Key = 29
-	KeyBackspace Key = 30
-	KeyDelete    Key = 31
-	KeyLeft      Key = 32
-	KeyRight     Key = 33
-	KeyUp        Key = 34
-	KeyDown      Key = 35
-	KeyHome      Key = 36
-	KeyEnd       Key = 37
-	KeyTab       Key = 38
+	KeyEnter     Key = 1
+	KeyEscape    Key = 2
+	KeyTab       Key = 3
+	KeyBackspace Key = 4
+	KeyDelete    Key = 5
+	KeyLeft      Key = 6
+	KeyRight     Key = 7
+	KeyUp        Key = 8
+	KeyDown      Key = 9
+	KeyHome      Key = 10
+	KeyEnd       Key = 11
 )
 
 // MouseButton enumerates the three buttons forwarded by the host.

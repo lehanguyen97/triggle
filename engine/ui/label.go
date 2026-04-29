@@ -2,17 +2,14 @@ package ui
 
 import (
 	"triggle/engine/emath"
-	"triggle/engine/text"
-	"triggle/engine/ui/cmd"
-	"triggle/engine/ui/theme"
 )
 
 // Label draws a single line of text.
 type Label struct {
 	BaseNode
-	parent Node
-	Text   string
-	Color  cmd.Color // zero = theme ColorText
+	Text  string
+	Style TextStyle
+	Color emath.Color // deprecated: zero = theme text color
 }
 
 // SetText updates the string and relayouts.
@@ -25,8 +22,9 @@ func (l *Label) SetText(s string) {
 }
 
 // SetColor sets an explicit text color; zero resets to default text color.
-func (l *Label) SetColor(c cmd.Color) {
+func (l *Label) SetColor(c emath.Color) {
 	l.Color = c
+	l.Style.Color = c
 	l.Invalidate()
 }
 
@@ -35,21 +33,20 @@ func (l *Label) Children() []Node { return nil }
 
 // Measure implements Node.
 func (l *Label) Measure(c Constraints) Size {
-	if l.app == nil || l.app.font == nil {
+	if l.app == nil {
 		return Size{W: 0, H: 0}
 	}
 	if l.Text == "" {
 		return Size{W: 0, H: 0}
 	}
 	_ = normConstraints(c)
-	px := l.app.theme.BodyPx
-	m := l.app.font.Metrics(px)
+	style := l.Style
+	m := l.app.MeasureText(l.Text, style)
 	h := m.Ascent + m.Descent
 	if h <= 0 {
-		h = px
+		h = m.Height
 	}
-	wv := l.app.font.Measure(l.Text, px)
-	return Size{W: int32(wv[0]), H: h}
+	return Size{W: m.Width, H: h}
 }
 
 // Place implements Node.
@@ -59,16 +56,15 @@ func (l *Label) Place(outer emath.Rect) {
 
 // Paint implements Node.
 func (l *Label) Paint(pc *PaintCtx) {
-	if l.app == nil || l.app.font == nil || l.Text == "" {
+	if l.app == nil || l.Text == "" {
 		return
 	}
-	col := l.Color
-	if col.A == 0 && col.R == 0 && col.G == 0 && col.B == 0 {
-		col = l.app.theme.Colors[theme.ColorText]
+	style := l.Style
+	if !isZeroColor(l.Color) {
+		style.Color = l.Color
 	}
 	r := l.rect
-	l.app.font.Draw(pc.Enc, l.Text, r.X, r.Y, l.app.theme.BodyPx,
-		text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
+	pc.Text(l.Text, style, r.X, r.Y)
 }
 
 // Event implements Node.

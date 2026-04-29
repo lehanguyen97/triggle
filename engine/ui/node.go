@@ -1,27 +1,25 @@
 package ui
 
 import (
+	"triggle/engine/draw2d"
 	"triggle/engine/emath"
-	"triggle/engine/text"
-	"triggle/engine/ui/cmd"
-	"triggle/engine/ui/theme"
 )
 
-// Size is a measured width/height in pixels.
+// Size is a measured width/height in lp.
 type Size struct {
-	W, H int32
+	W, H float32
 }
 
 // Constraints are passed top-down from parents during layout.
 type Constraints struct {
-	MinW, MaxW, MinH, MaxH int32
+	MinW, MaxW, MinH, MaxH float32
 }
 
 // PaintCtx is passed during painting.
 type PaintCtx struct {
-	Enc   *cmd.Encoder
-	Theme *theme.Theme
-	Font  *text.Font
+	*draw2d.Context
+	Theme *Theme
+	Root  *Root
 }
 
 // Event is passed to focused widgets; Frame points at the current InputFrame.
@@ -31,13 +29,13 @@ type Event struct {
 
 // EventCtx is passed to Event handlers; carries focus/mouse state for widgets.
 type EventCtx struct {
-	App     *App
-	Frame   InputFrame
-	DT      float32
-	MouseX  int32
-	MouseY  int32
-	LocalX  int32 // in receiver's local rect
-	LocalY  int32
+	App    *Root
+	Frame  InputFrame
+	DT     float32
+	MouseX float32
+	MouseY float32
+	LocalX float32 // in receiver's local rect
+	LocalY float32
 }
 
 // Node is a retained tree node. Measure returns intrinsic size; Place assigns
@@ -52,10 +50,17 @@ type Node interface {
 	Children() []Node
 }
 
+// TickingNode is an optional interface for nodes that need a per-frame dt hook
+// (animations, counters). Overlay.Tick walks the tree and calls TickNode before
+// layout so nodes can update any state that affects measurement.
+type TickingNode interface {
+	TickNode(dt float32)
+}
+
 // BaseNode is embedded by every Node; holds app link, id, and bounds.
 type BaseNode struct {
 	id   uint32
-	app  *App
+	app  *Root
 	rect emath.Rect
 }
 
@@ -81,7 +86,7 @@ func (b *BaseNode) Invalidate() {
 	b.app.layoutDirty = true
 }
 
-func (b *BaseNode) mount(app *App) {
+func (b *BaseNode) mount(app *Root) {
 	b.app = app
 	if b.app != nil && b.id == 0 {
 		b.id = b.app.nextNodeID()
@@ -89,11 +94,11 @@ func (b *BaseNode) mount(app *App) {
 }
 
 // App returns the owning app (set after SetRoot / mount).
-func (b *BaseNode) App() *App { return b.app }
+func (b *BaseNode) App() *Root { return b.app }
 
 // normConstraints clamps invalid Max values (0 Max => huge).
 func normConstraints(c Constraints) Constraints {
-	const big int32 = 1<<30
+	const big float32 = 1 << 24
 	if c.MaxW <= 0 {
 		c.MaxW = big
 	}

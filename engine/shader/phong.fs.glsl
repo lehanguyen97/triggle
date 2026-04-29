@@ -1,13 +1,13 @@
 #version 300 es
 precision mediump float;
 uniform vec3 lightDir;
-uniform vec3 ambient;
 uniform vec3 cameraPos;
 uniform mediump sampler2DShadow shadowMap;
 in vec3 v_worldPos;
 in vec3 v_normal;
 in vec4 v_color;
 in vec4 v_lightSpace;
+in vec3 v_ambient;
 out vec4 fragColor;
 void main() {
     vec3 N = normalize(v_normal);
@@ -23,6 +23,6 @@ void main() {
         proj.y >= 0.0 && proj.y <= 1.0) {
         shadow = texture(shadowMap, proj);
     }
-    vec3 lit = ambient + shadow * (diff * vec3(1.0) + spec * vec3(0.3));
+    vec3 lit = v_ambient + shadow * (diff * vec3(1.0) + spec * vec3(0.3));
     fragColor = vec4(v_color.rgb * lit, v_color.a);
 }

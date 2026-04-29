@@ -7,7 +7,7 @@ import (
 
 const (
 	cmdMagic   uint32 = 0x31424354 // TCB1
-	cmdVersion uint16 = 1
+	cmdVersion uint16 = 2
 
 	cmdPassBegin        uint8 = 1
 	cmdPassBeginDefault uint8 = 2
@@ -19,6 +19,7 @@ const (
 	cmdDrawElements     uint8 = 8
 	cmdCommit           uint8 = 9
 	cmdApplyScissor     uint8 = 10
+	cmdBindVertexBuffer uint8 = 11
 )
 
 type commandBuffer struct {

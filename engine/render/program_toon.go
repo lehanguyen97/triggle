@@ -5,6 +5,8 @@ import (
 	"triggle/engine/shader"
 )
 
+// ToonProgram is the instanced toon main-pass program. Per-instance model +
+// tint come from buffer_index=1 (slots 3..7); no shadow map bind.
 type ToonProgram struct {
 	shader     int32
 	mainFamily PipelineFamilyID
@@ -13,14 +15,26 @@ type ToonProgram struct {
 func NewToonProgram() *ToonProgram { return &ToonProgram{} }
 
 func (p *ToonProgram) Init(g backend.Backend, cache *PipelineFamilyCache) bool {
-	p.shader = shader.CreateShader(g, p.shaderDesc())
+	p.shader = shader.CreateShader(g, shader.ToonShaderDesc())
 	if p.shader < 0 {
 		return false
 	}
 	p.mainFamily = cache.RegisterPipelineFamily(PipelineFamilyDesc{
-		Shader:     p.shader,
-		Stride:     int32(shader.PhongVertexStride),
-		Attrs:      []int{shader.AttrFloat3, shader.AttrFloat3, shader.AttrFloat4},
+		Shader: p.shader,
+		Buffers: []VertexBufferLayout{
+			{Stride: int32(shader.PhongVertexStride), Step: StepPerVertex},
+			{Stride: int32(shader.InstanceStride), Step: StepPerInstance},
+		},
+		Attrs: []VertexAttr{
+			{Slot: 0, BufferIndex: 0, Format: shader.AttrFloat3},
+			{Slot: 1, BufferIndex: 0, Format: shader.AttrFloat3},
+			{Slot: 2, BufferIndex: 0, Format: shader.AttrFloat4},
+			{Slot: 3, BufferIndex: 1, Format: shader.AttrFloat4},
+			{Slot: 4, BufferIndex: 1, Format: shader.AttrFloat4},
+			{Slot: 5, BufferIndex: 1, Format: shader.AttrFloat4},
+			{Slot: 6, BufferIndex: 1, Format: shader.AttrFloat4},
+			{Slot: 7, BufferIndex: 1, Format: shader.AttrFloat4},
+		},
 		DepthCmp:   shader.CmpLessEqual,
 		DepthWrite: true,
 		Cull:       shader.CullBack,
@@ -31,23 +45,18 @@ func (p *ToonProgram) Init(g backend.Backend, cache *PipelineFamilyCache) bool {
 
 func (p *ToonProgram) MainFamily() PipelineFamilyID { return p.mainFamily }
 
-func (p *ToonProgram) BindMain(_ *ForwardRenderer) {}
+func (p *ToonProgram) BindMain(_ *Server) {}
 
-func (p *ToonProgram) DrawMain(r *ForwardRenderer, d SceneDrawable, indexCount int32) {
-	var vsData [32]float32
-	copy(vsData[0:16], d.Model[:])
-	copy(vsData[16:32], r.cam.ViewProj[:])
-	r.emitApplyUniforms(0, bytesFromFloat32Slice(vsData[:]))
-
-	fsData := [6]float32{
-		r.light.Dir[0], r.light.Dir[1], r.light.Dir[2],
-		d.Ambient[0], d.Ambient[1], d.Ambient[2],
+func (p *ToonProgram) DrawInstanced(r *Server, indexCount, instanceCount int32) {
+	if indexCount <= 0 || instanceCount <= 0 {
+		return
 	}
-	r.emitApplyUniforms(1, bytesFromFloat32Slice(fsData[:]))
-
-	if indexCount > 0 {
-		r.emitDrawElements(0, indexCount, 1)
+	r.EmitApplyUniforms(0, BytesFromFloat32Slice(r.cam.ViewProj[:]))
+	fsData := [3]float32{
+		r.frameLight.state.Dir[0], r.frameLight.state.Dir[1], r.frameLight.state.Dir[2],
 	}
+	r.EmitApplyUniforms(1, BytesFromFloat32Slice(fsData[:]))
+	r.EmitDrawElements(0, indexCount, instanceCount)
 }
 
 func (p *ToonProgram) Release(g backend.Backend) {
@@ -55,8 +64,4 @@ func (p *ToonProgram) Release(g backend.Backend) {
 		g.ShaderDestroy(p.shader)
 		p.shader = -1
 	}
-}
-
-func (p *ToonProgram) shaderDesc() shader.ShaderDesc {
-	return shader.ToonShaderDesc()
 }

@@ -102,6 +102,24 @@ func (e Backend) MeshInfo(mesh int32) (MeshInfo, bool) {
 	return info, true
 }
 
+// BufferCreate allocates a dynamic vertex buffer (stream-update) of sizeBytes.
+func (e Backend) BufferCreate(sizeBytes int32) int32 {
+	return Host.Buffer.Create(e.handle, sizeBytes)
+}
+
+// BufferUpdate uploads data (size bytes) into buf via backend-memory copy.
+func (e Backend) BufferUpdate(buf int32, data unsafe.Pointer, size int32) {
+	if size <= 0 || data == nil {
+		return
+	}
+	p := e.Malloc(size)
+	defer e.Free(p)
+	e.BulkCopy(p, data, size)
+	Host.Buffer.Update(e.handle, buf, p, size)
+}
+
+func (e Backend) BufferDestroy(buf int32) { Host.Buffer.Destroy(e.handle, buf) }
+
 func (e Backend) GltfLoad(path string) int32 {
 	n := int32(len(path) + 1)
 	p := e.Malloc(n)

@@ -2,22 +2,19 @@ package ui
 
 import (
 	"triggle/engine/emath"
-	"triggle/engine/text"
-	"triggle/engine/ui/theme"
 )
 
 // Window is a titled, draggable container with a padded content area.
 type Window struct {
 	BaseNode
-	parent Node
-	Title  string
-	Pos    emath.Vec2
-	Width  int32   // 0 = shrink to child
-	Child  Node
-	Flags  WindowOpt
+	Title string
+	Pos   emath.Vec2
+	Width float32 // 0 = shrink to child
+	Child Node
+	Flags WindowOpt
 
-	Dragging   bool
-	grabX, grabY int32
+	Dragging     bool
+	grabX, grabY float32
 
 	outerSize Size
 	lastChild Size
@@ -31,7 +28,7 @@ func (w *Window) Children() []Node {
 	return []Node{w.Child}
 }
 
-func (w *Window) titleHeight() int32 {
+func (w *Window) titleHeight() float32 {
 	if w.app == nil {
 		return 0
 	}
@@ -42,7 +39,7 @@ func (w *Window) titleHeight() int32 {
 }
 
 // titleBarRect returns the title bar in absolute coords, if any.
-func (w *Window) titleBarRect() (x, y, th int32, ok bool) {
+func (w *Window) titleBarRect() (x, y, th float32, ok bool) {
 	th = w.titleHeight()
 	if th == 0 {
 		return 0, 0, 0, false
@@ -78,6 +75,9 @@ func (w *Window) Measure(c Constraints) Size {
 	}
 	w.lastChild = chSize
 	outerW := w.Width
+	if w.Flags&WindowUseParentRect != 0 {
+		outerW = cn.MaxW
+	}
 	if outerW == 0 {
 		outerW = chSize.W + pad.Left + pad.Right
 	}
@@ -86,11 +86,20 @@ func (w *Window) Measure(c Constraints) Size {
 	return w.outerSize
 }
 
-// Place implements Node. Root passes viewport; window uses Pos for (X,Y).
+// Place implements Node. Floating windows use Pos for placement; anchored
+// windows can opt into parent-provided X/Y/W via WindowUseParentRect.
 func (w *Window) Place(outer emath.Rect) {
+	x, y := w.Pos[0], w.Pos[1]
+	width := w.outerSize.W
+	if w.Flags&WindowUseParentRect != 0 {
+		x, y = outer.X, outer.Y
+		if outer.W > 0 {
+			width = outer.W
+		}
+	}
 	w.rect = emath.Rect{
-		X: int32(w.Pos[0]), Y: int32(w.Pos[1]),
-		W: w.outerSize.W, H: w.outerSize.H,
+		X: x, Y: y,
+		W: width, H: w.outerSize.H,
 	}
 	if w.app == nil {
 		return
@@ -120,12 +129,12 @@ func (w *Window) Paint(pc *PaintCtx) {
 		return
 	}
 	if w.Flags&WindowNoFrame == 0 {
-		pc.Enc.QuadSolid(w.rect, w.app.theme.Colors[theme.ColorWindowBG])
+		pc.Rect(w.rect, w.app.theme.Colors[ColorWindowBG])
 	}
 	th := w.titleHeight()
 	if th > 0 {
 		tb := emath.Rect{X: w.rect.X, Y: w.rect.Y, W: w.rect.W, H: th}
-		pc.Enc.QuadSolid(tb, w.app.theme.Colors[theme.ColorTitleBG])
+		pc.Rect(tb, w.app.theme.Colors[ColorTitleBG])
 		w.drawTitle(pc, w.rect, th)
 	}
 	pad := w.app.theme.Padding
@@ -139,30 +148,36 @@ func (w *Window) Paint(pc *PaintCtx) {
 		W: w.rect.W - pad.Left - pad.Right,
 		H: clipH,
 	}
-	pc.Enc.PushClip(clipR)
+	pc.PushClip(clipR)
 	if w.Child != nil {
 		w.Child.Paint(pc)
 	}
-	pc.Enc.PopClip()
+	pc.PopClip()
 }
 
-func (w *Window) drawTitle(pc *PaintCtx, win emath.Rect, titleH int32) {
-	if w.Title == "" || pc.Font == nil {
+func (w *Window) drawTitle(pc *PaintCtx, win emath.Rect, titleH float32) {
+	if w.Title == "" {
 		return
 	}
 	th := w.app.theme
-	px := th.TitlePx
+	style := resolveRootTextStyle(w.app, TextStyle{SizeLp: th.TitleLp, Color: th.Colors[ColorTitleText]})
+	if style.Font == nil {
+		return
+	}
 	tx := win.X + 6
 	ty := win.Y + titleH/2
-	sz := pc.Font.Measure(w.Title, px)
-	if sz[1] > 0 {
-		ty -= int32(sz[1] * 0.5)
+	sz := w.app.MeasureText(w.Title, TextStyle{SizeLp: th.TitleLp, Color: th.Colors[ColorTitleText]})
+	if sz.Height > 0 {
+		ty -= sz.Height / 2
 	} else {
-		ty -= pc.Font.Metrics(px).Ascent / 2
+		// Metrics returns physical-px ascent; convert to lp.
+		asc := style.Font.Metrics(style.SizePx).Ascent
+		if scale := w.app.vpState.UIScale; scale > 0 {
+			asc = asc / scale
+		}
+		ty -= asc / 2
 	}
-	col := th.Colors[theme.ColorTitleText]
-	pc.Font.Draw(pc.Enc, w.Title, tx, ty, px,
-		text.Color{R: col.R, G: col.G, B: col.B, A: col.A})
+	pc.Text(w.Title, TextStyle{SizeLp: th.TitleLp, Color: th.Colors[ColorTitleText]}, tx, ty)
 }
 
 // Event implements Node.

@@ -33,6 +33,12 @@ type BackendHost struct {
 		Info    func(m int32, out Ptr)
 	}
 
+	Buffer struct {
+		Create  func(e int32, sizeBytes int32) int32
+		Update  func(e int32, buf int32, data Ptr, size int32)
+		Destroy func(e int32, buf int32)
+	}
+
 	Gltf struct {
 		Load           func(e int32, path Ptr) int32
 		Unload         func(e int32, asset int32)
@@ -104,6 +110,16 @@ func init() {
 	Host.Mesh.Destroy = func(m int32) { C.backend_mesh_destroy(C.mesh_t(m)) }
 	Host.Mesh.Info = func(m int32, out Ptr) {
 		C.backend_mesh_get_info(C.mesh_t(m), (*C.backend_mesh_info_t)(unsafe.Pointer(out)))
+	}
+
+	Host.Buffer.Create = func(e int32, sizeBytes int32) int32 {
+		return int32(C.backend_buffer_create(C.backend_t(e), C.int(sizeBytes)))
+	}
+	Host.Buffer.Update = func(e int32, buf int32, data Ptr, size int32) {
+		C.backend_buffer_update(C.backend_t(e), C.buffer_t(buf), unsafe.Pointer(data), C.int(size))
+	}
+	Host.Buffer.Destroy = func(e int32, buf int32) {
+		C.backend_buffer_destroy(C.backend_t(e), C.buffer_t(buf))
 	}
 
 	Host.Gltf.Load = func(e int32, path Ptr) int32 {

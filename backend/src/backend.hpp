@@ -20,6 +20,7 @@ struct GltfAsset {
 struct Backend {
     std::vector<MeshEntry> meshes;
     std::vector<GltfAsset> gltf_assets;
+    std::vector<sg_buffer> buffers;   // dynamic vertex buffers (stream-update)
     std::vector<sg_shader> shaders;
     std::vector<sg_pipeline> pipelines;
     std::vector<sg_image> images;

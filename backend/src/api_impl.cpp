@@ -96,10 +96,11 @@ enum BackendCmdOpcode : uint8_t {
     BACKEND_CMD_DRAW_ELEMENTS = 8,
     BACKEND_CMD_COMMIT = 9,
     BACKEND_CMD_APPLY_SCISSOR = 10,
+    BACKEND_CMD_BIND_VERTEX_BUFFER = 11,
 };
 
 static constexpr uint32_t BACKEND_CMD_MAGIC = 0x31424354u; /* TCB1 */
-static constexpr uint16_t BACKEND_CMD_VERSION = 1;
+static constexpr uint16_t BACKEND_CMD_VERSION = 2;
 
 /* --- Sokol enum mappings --- */
 static sg_vertex_format map_attr_format(int32_t f) {
@@ -250,6 +251,34 @@ EXPORT void backend_mesh_get_info(mesh_t m, backend_mesh_info_t* out_info) {
     out_info->index_type = e->mesh_index_type(m);
 }
 
+/* --- Dynamic vertex buffer (stream-update) --- */
+EXPORT buffer_t backend_buffer_create(backend_t et, int32_t size_bytes) {
+    if (!e || et != 0 || size_bytes <= 0) return -1;
+    sg_buffer_desc bd = {};
+    bd.size = (size_t)size_bytes;
+    bd.usage.stream_update = true;
+    bd.label = "dynamic_vbuf";
+    sg_buffer buf = sg_make_buffer(&bd);
+    buffer_t id = (buffer_t)e->buffers.size();
+    e->buffers.push_back(buf);
+    return id;
+}
+
+EXPORT void backend_buffer_update(backend_t et, buffer_t buf, const void* data, int32_t size) {
+    if (!e || et != 0 || buf < 0 || buf >= (buffer_t)e->buffers.size()) return;
+    if (!data || size <= 0) return;
+    if (e->buffers[buf].id == SG_INVALID_ID) return;
+    sg_range r = {data, (size_t)size};
+    sg_update_buffer(e->buffers[buf], &r);
+}
+
+EXPORT void backend_buffer_destroy(backend_t et, buffer_t buf) {
+    if (!e || et != 0 || buf < 0 || buf >= (buffer_t)e->buffers.size()) return;
+    if (e->buffers[buf].id == SG_INVALID_ID) return;
+    sg_destroy_buffer(e->buffers[buf]);
+    e->buffers[buf] = sg_buffer{SG_INVALID_ID};
+}
+
 EXPORT int32_t backend_gltf_load(backend_t et, const char* path) {
     if (!e || et != 0 || !path) return -1;
     return e->gltf_load(path);
@@ -368,7 +397,11 @@ EXPORT void backend_shader_destroy(backend_t et, shader_t shader) {
     e->shaders[shader] = sg_shader{SG_INVALID_ID};
 }
 
-/* --- Pipeline (binary descriptor) --- */
+/* --- Pipeline (binary descriptor) ---
+ * Format v2: shader(i32), num_buffers(u8), [stride(i32), step(u8)]...,
+ *            num_attrs(u8), [slot(u8), buffer_index(u8), format(u8)]...,
+ *            depth_cmp, depth_write, cull, idx_type, color_count, blend (all u8).
+ */
 EXPORT pipeline_t backend_pipeline_create(backend_t et, void* desc_data, int32_t desc_len) {
     if (!e || et != 0) return -1;
 
@@ -376,17 +409,27 @@ EXPORT pipeline_t backend_pipeline_create(backend_t et, void* desc_data, int32_t
     sg_pipeline_desc desc = {};
 
     int32_t shader_id = r.read_i32();
-    int32_t stride = r.read_i32();
 
     if (shader_id < 0 || shader_id >= (int32_t)e->shaders.size()) return -1;
     desc.shader = e->shaders[shader_id];
-    desc.layout.buffers[0].stride = stride;
+
+    uint8_t num_buffers = r.read_u8();
+    for (int i = 0; i < num_buffers; i++) {
+        int32_t stride = r.read_i32();
+        uint8_t step = r.read_u8();
+        desc.layout.buffers[i].stride = stride;
+        desc.layout.buffers[i].step_func = (step == BACKEND_STEP_PER_INSTANCE)
+            ? SG_VERTEXSTEP_PER_INSTANCE
+            : SG_VERTEXSTEP_PER_VERTEX;
+    }
 
     uint8_t num_attrs = r.read_u8();
     for (int i = 0; i < num_attrs; i++) {
         uint8_t idx = r.read_u8();
+        uint8_t buf_idx = r.read_u8();
         uint8_t fmt = r.read_u8();
         desc.layout.attrs[idx].format = map_attr_format(fmt);
+        desc.layout.attrs[idx].buffer_index = buf_idx;
     }
 
     uint8_t depth_cmp = r.read_u8();
@@ -643,6 +686,14 @@ EXPORT void backend_submit_command_buffer(backend_t et, void* data, int32_t len)
                 if (mesh < 0 || mesh >= (int32_t)e->meshes.size()) return;
                 e->current_bindings.vertex_buffers[0] = e->meshes[mesh].bind.vertex_buffers[0];
                 e->current_bindings.index_buffer = e->meshes[mesh].bind.index_buffer;
+                break;
+            }
+            case BACKEND_CMD_BIND_VERTEX_BUFFER: {
+                int32_t slot = 0, buf = -1;
+                if (!r.read_i32(&slot) || !r.read_i32(&buf)) return;
+                if (slot < 0 || slot >= SG_MAX_VERTEXBUFFER_BINDSLOTS) return;
+                if (buf < 0 || buf >= (int32_t)e->buffers.size()) return;
+                e->current_bindings.vertex_buffers[slot] = e->buffers[buf];
                 break;
             }
             case BACKEND_CMD_BIND_IMAGE: {
